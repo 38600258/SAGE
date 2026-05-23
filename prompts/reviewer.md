@@ -24,9 +24,10 @@
 
 ### 启动步骤
 
-1. 读取当前任务的标题、正文和上游阶段的交接信息
-2. 获取任务文档路径（`task_doc`）和功能分支名（`branch`）
-3. 切换到项目根目录
+1. 获取仓库根目录绝对路径（`REPO_ROOT`）、任务文档绝对路径（`TASK_PATH`）和功能分支名（`branch`）
+2. 先定位到 `REPO_ROOT`，再读取 `REPO_ROOT/prompts/reviewer.md`、`TASK_PATH` 和上游阶段交接信息
+3. 如果调用方只给出“按仓库”“读取 prompts/reviewer.md”或相对 TASK 路径，必须要求补充绝对路径；不得猜测仓库位置或写入相对路径
+4. 审查报告必须写回 `TASK_PATH` 的对应章节，不能只输出到聊天或 stdout
 
 ---
 

@@ -121,10 +121,10 @@ def check_template_copy(task_file, template_file):
 
     missing_headers = []
     for h in tpl_headers:
-        # 去掉 markdown 链接或动态标记，模糊匹配标题是否存在
-        h_clean = re.sub(r'[\(\[\]\)]', '', h).strip()
-        # 提取标题核心字，如 "## 🛠️ 阶段 1"
-        h_core = h_clean.split("：")[0].split("(")[0].strip()
+        # 提取标题核心字，如 "任务元数据" 或 "阶段 1"
+        h_core = re.sub(r"\s+—\s+.*$", "", h)
+        h_core = re.sub(r"\s+`[^`]+`", "", h_core)
+        h_core = re.sub(r"\s*\([^)]*\)", "", h_core).strip()
         if h_core not in task_content:
             missing_headers.append(h)
 
@@ -555,6 +555,80 @@ def check_evidence_complete(task_file):
     return True, "证据链完整性校验通过 (自动化测试与 Lint 证据已勾选确认)"
 
 
+def check_review_complete(task_file):
+    """13. 盲审结果完整性: L2/L3 任务必须写入计划评审与代码评审报告"""
+    task_path = Path(task_file)
+    if not task_path.exists():
+        return False, f"任务文档不存在: {task_file}"
+
+    content = "".join(get_file_lines(task_path))
+
+    risk_match = re.search(r'-\s*\*\*风险等级\*\*:\s*(L1|L2|L3)', content)
+    if not risk_match:
+        risk_match = re.search(r'风险等级\s*[:：]\s*(L1|L2|L3)', content)
+    risk_level = risk_match.group(1) if risk_match else "L2"
+
+    if risk_level == "L1":
+        return True, "L1 任务可跳过阶段二/四盲审，跳过盲审完整性校验。"
+
+    def section_between(start_markers, end_markers):
+        start = -1
+        for marker in start_markers:
+            start = content.find(marker)
+            if start != -1:
+                break
+        if start == -1:
+            return None
+        end_positions = [
+            match.start()
+            for marker in end_markers
+            for match in re.finditer(r"(?m)^" + re.escape(marker), content[start + 1:])
+        ]
+        end_positions = [start + 1 + p for p in end_positions]
+        end = min(end_positions) if end_positions else len(content)
+        return content[start:end]
+
+    plan_section = section_between(
+        ["### 2.1 评审意见", "### 2.1 Review Feedback"],
+        ["## 💻 阶段 3", "## 阶段 3"],
+    )
+    code_section = section_between(
+        ["### 4.1 代码评审", "### 4.1 Code Review Feedback"],
+        ["## 🧠 阶段 5", "## 阶段 5"],
+    )
+
+    def is_review_filled(section):
+        if not section:
+            return False
+        placeholders = ["由 reviewer 填写", "如有修改", "评审反馈", "待填", "(由", "(如有"]
+        substantive_markers = ["审查结果", "OK", "WARN", "BLOCK", "✅", "⚠️", "🛑"]
+        has_marker = any(m in section for m in substantive_markers)
+        has_content = any(
+            line.strip()
+            and not line.strip().startswith("###")
+            and not line.strip().startswith("- [ ]")
+            and not line.startswith("- [ ]")
+            and not any(p in line for p in placeholders)
+            for line in section.splitlines()
+        )
+        return has_marker and has_content
+
+    missing = []
+    if not is_review_filled(plan_section):
+        missing.append("2.1 计划评审报告")
+    if not is_review_filled(code_section):
+        missing.append("4.1 代码评审报告")
+
+    if missing:
+        return False, (
+            f"🛑 盲审结果缺失：风险等级为 {risk_level}，但以下章节未写入有效审查报告："
+            + "、".join(missing)
+            + "。独立 reviewer 必须确认 TASK 文档对应章节已写入 OK/WARN/BLOCK 等 Markdown 审查结果。"
+        )
+
+    return True, f"盲审结果完整性校验通过 (风险等级: {risk_level})"
+
+
 # ==============================================================================
 # CLI 入口与多功能调度
 # ==============================================================================
@@ -564,6 +638,8 @@ def main():
     parser.add_argument("--check-task", help="验证指定的活跃任务文档结构与规范")
     parser.add_argument("--all", action="store_true", help="在当前目录下运行一键全量工作流校验")
     parser.add_argument("--stale-days", type=int, default=30, help="文档新鲜度天数门限 (默认 30 天)")
+    parser.add_argument("--allow-template-changes", action="store_true",
+                        help="允许模板文件变更（仅限模板/流程规范任务使用）")
 
     args = parser.parse_args()
 
@@ -609,7 +685,8 @@ def main():
             (lambda: check_task_structure(task_file), "2. 任务结构校验"),
             (lambda: check_task_risk_sections(task_file), "3. 风险扩展校验"),
             (lambda: check_scope_lock(task_file, sage_root), "10. 范围锁定校验"),
-            (lambda: check_evidence_complete(task_file), "12. 证据链完整校验")
+            (lambda: check_evidence_complete(task_file), "12. 证据链完整校验"),
+            (lambda: check_review_complete(task_file), "13. 盲审结果校验")
         ]
 
         for func, name in checkers:
@@ -651,7 +728,10 @@ def main():
             success = False
 
         # 2. 模板守护校验
-        ok, msg = check_templates_pristine(templates_dir, sage_root)
+        if args.allow_template_changes:
+            ok, msg = True, "模板变更已由 --allow-template-changes 显式允许"
+        else:
+            ok, msg = check_templates_pristine(templates_dir, sage_root)
         if ok:
             print(f"🟢 [7/12] 模板完整校验: {msg}")
         else:
@@ -706,8 +786,9 @@ def main():
                 (lambda: check_template_copy(task_file, template_file), "1/12 模板复制校验"),
                 (lambda: check_task_structure(task_file), "2/12 任务大纲校验"),
                 (lambda: check_task_risk_sections(task_file), "3/12 风险扩展校验"),
-                (lambda: check_scope_lock(task_file, sage_root), "10/12 范围锁定校验"),
-                (lambda: check_evidence_complete(task_file), "12/12 证据链校验")
+                (lambda: check_scope_lock(task_file, sage_root), "10/13 范围锁定校验"),
+                (lambda: check_evidence_complete(task_file), "12/13 证据链校验"),
+                (lambda: check_review_complete(task_file), "13/13 盲审结果校验")
             ]
             for func, name in task_checkers:
                 ok, msg = func()
