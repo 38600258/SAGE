@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SAGE 工作流通用检查器 (SAGE Linter)
 
-此脚本集成了方法论中要求的所有 12 个检查器，不依赖任何第三方 Python 库，
+此脚本集成了方法论中要求的所有 13 个检查器，不依赖任何第三方 Python 库，
 仅使用标准库及本地 git 命令。可以在任何智能体或人类开发流程中独立运行。
 
 SAGE = Steer, Agent Goes Execute (人类掌舵，智能体执行)
@@ -9,6 +9,7 @@ SAGE = Steer, Agent Goes Execute (人类掌舵，智能体执行)
 用法:
     python scripts/sage_linter.py --all
     python scripts/sage_linter.py --check-task docs/project/ACTIVE_TASK_T-XXX.md
+    python scripts/sage_linter.py --check-commit-msg .git/COMMIT_EDITMSG
 """
 
 import argparse
@@ -95,7 +96,7 @@ def get_file_lines(path):
         return []
 
 # ==============================================================================
-# 12 个检查器核心实现
+# 13 个检查器核心实现
 # ==============================================================================
 
 def check_template_copy(task_file, template_file):
@@ -236,6 +237,51 @@ def check_git_branch_isolation(cwd=None):
         return False, f"🛑 隔离红线违规：当前处于受保护的分支 '{curr_branch}'。所有开发必须在独立功能分支上进行！"
 
     return True, f"分支隔离校验通过 (当前分支: {curr_branch})"
+
+
+def check_commit_message(message_file):
+    """提交信息校验: Conventional Commit 标题描述必须包含中文字符"""
+    msg_path = Path(message_file)
+    if not msg_path.exists():
+        return False, f"提交信息文件不存在: {message_file}"
+
+    lines = get_file_lines(msg_path)
+    subject = ""
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            subject = stripped
+            break
+
+    if not subject:
+        return False, "提交信息为空，请填写提交标题。"
+
+    exempt_patterns = [
+        r"^Merge\b",
+        r"^Revert\b",
+        r"^fixup!",
+        r"^squash!",
+    ]
+    if any(re.match(pattern, subject, re.IGNORECASE) for pattern in exempt_patterns):
+        return True, f"系统/整理类提交豁免中文标题检查: {subject}"
+
+    conventional_re = re.compile(
+        r"^(feat|fix|docs|refactor|test|chore|style|perf|build|ci|revert)"
+        r"(\([^)]+\))?:\s+.+"
+    )
+    if not conventional_re.match(subject):
+        return False, (
+            "提交标题不符合 Conventional Commit 格式。\n"
+            "允许格式: type(scope): 中文描述，例如 docs(project): 审查 PRD 看板任务拆分"
+        )
+
+    if not re.search(r"[\u4e00-\u9fff]", subject):
+        return False, (
+            "提交标题描述必须包含中文字符。\n"
+            "示例: docs(project): 审查 PRD 看板任务拆分"
+        )
+
+    return True, f"提交信息校验通过: {subject}"
 
 def check_t2_document_lines(docs_dir):
     """5. T2 文档体积校验: 检查 docs/ guides 下的文件行数是否超过 500 行"""
@@ -640,6 +686,8 @@ def main():
     parser.add_argument("--stale-days", type=int, default=30, help="文档新鲜度天数门限 (默认 30 天)")
     parser.add_argument("--allow-template-changes", action="store_true",
                         help="允许模板文件变更（仅限模板/流程规范任务使用）")
+    parser.add_argument("--check-commit-msg",
+                        help="检查提交信息文件，要求 Conventional Commit 标题描述包含中文")
 
     args = parser.parse_args()
 
@@ -655,6 +703,14 @@ def main():
 
     if not sage_root:
         print("🛑 错误：无法定位 SAGE 项目根目录（未找到 AGENTS.md）。请在项目根目录下运行此脚本。")
+        sys.exit(1)
+
+    if args.check_commit_msg:
+        ok, msg = check_commit_message(args.check_commit_msg)
+        if ok:
+            print(f"提交信息中文校验通过: {msg}")
+            sys.exit(0)
+        print(f"提交信息中文校验失败: {msg}", file=sys.stderr)
         sys.exit(1)
 
     print(f"🔍 正在初始化 SAGE Linter，工作根目录: {sage_root}\n")
@@ -699,7 +755,7 @@ def main():
         print()
 
     # ==========================================================================
-    # 场景 B: 一键全量校验 (一键运行全部 12 个检查器)
+    # 场景 B: 一键全量校验 (一键运行全部 13 个检查器)
     # ==========================================================================
     if args.all or not args.check_task:
         if not args.all:
@@ -722,9 +778,9 @@ def main():
         # 1. 物理分支隔离校验
         ok, msg = check_git_branch_isolation(sage_root)
         if ok:
-            print(f"🟢 [4/12] 分支隔离校验: {msg}")
+            print(f"🟢 [4/13] 分支隔离校验: {msg}")
         else:
-            print(f"🔴 [4/12] 分支隔离校验: FAIL\n    👉 {msg}")
+            print(f"🔴 [4/13] 分支隔离校验: FAIL\n    👉 {msg}")
             success = False
 
         # 2. 模板守护校验
@@ -733,59 +789,59 @@ def main():
         else:
             ok, msg = check_templates_pristine(templates_dir, sage_root)
         if ok:
-            print(f"🟢 [7/12] 模板完整校验: {msg}")
+            print(f"🟢 [7/13] 模板完整校验: {msg}")
         else:
-            print(f"🔴 [7/12] 模板完整校验: FAIL\n    👉 {msg}")
+            print(f"🔴 [7/13] 模板完整校验: FAIL\n    👉 {msg}")
             success = False
 
         # 3. 只增不改日志校验
         ok, msg = check_append_only(decision_log_file, sage_root)
         if ok:
-            print(f"🟢 [9/12] 日志增改限制: {msg}")
+            print(f"🟢 [9/13] 日志增改限制: {msg}")
         else:
-            print(f"🔴 [9/12] 日志增改限制: FAIL\n    👉 {msg}")
+            print(f"🔴 [9/13] 日志增改限制: FAIL\n    👉 {msg}")
             success = False
 
         # 4. CHANGELOG 联动更新校验
         ok, msg = check_changelog_update(changelog_file, sage_root)
         if ok:
-            print(f"🟢 [8/12] 日志更新联动: {msg}")
+            print(f"🟢 [8/13] 日志更新联动: {msg}")
         else:
-            print(f"🔴 [8/12] 日志更新联动: FAIL\n    👉 {msg}")
+            print(f"🔴 [8/13] 日志更新联动: FAIL\n    👉 {msg}")
             success = False
 
         # 5. T2 规范体积校验
         ok, msg = check_t2_document_lines(docs_dir)
         if ok:
-            print(f"🟢 [5/12] 规范文档体积: {msg}")
+            print(f"🟢 [5/13] 规范文档体积: {msg}")
         else:
-            print(f"🔴 [5/12] 规范文档体积: FAIL\n    👉 {msg}")
+            print(f"🔴 [5/13] 规范文档体积: FAIL\n    👉 {msg}")
             success = False
 
         # [FIX BUG-7] 6. 本地交叉引用验证 — 扫描整个项目根目录（不只是 docs/）
         # 以覆盖 AGENTS.md、ARCHITECTURE.md 和方法论文件中的链接
         ok, msg = check_cross_links(sage_root)
         if ok:
-            print(f"🟢 [11/12] 交叉引用校验: {msg}")
+            print(f"🟢 [11/13] 交叉引用校验: {msg}")
         else:
-            print(f"🔴 [11/12] 交叉引用校验: FAIL\n    👉 {msg}")
+            print(f"🔴 [11/13] 交叉引用校验: FAIL\n    👉 {msg}")
             success = False
 
         # 7. 文档新鲜度扫描 (警告级)
         ok, msg = check_document_freshness(docs_dir, args.stale_days)
         if "⚠️" in msg:
             warnings.append(msg)
-            print(f"🟡 [6/12] 文档新鲜扫描: WARNING (详见尾部输出)")
+            print(f"🟡 [6/13] 文档新鲜扫描: WARNING (详见尾部输出)")
         else:
-            print(f"🟢 [6/12] 文档新鲜扫描: {msg}")
+            print(f"🟢 [6/13] 文档新鲜扫描: {msg}")
 
         # [FIX DESIGN-3] 如果已通过 --check-task 单独校验过，不再重复执行任务级校验
         if task_file and not args.check_task:
             print("\n--- 任务级细节深度扫描 ---")
             task_checkers = [
-                (lambda: check_template_copy(task_file, template_file), "1/12 模板复制校验"),
-                (lambda: check_task_structure(task_file), "2/12 任务大纲校验"),
-                (lambda: check_task_risk_sections(task_file), "3/12 风险扩展校验"),
+                (lambda: check_template_copy(task_file, template_file), "1/13 模板复制校验"),
+                (lambda: check_task_structure(task_file), "2/13 任务大纲校验"),
+                (lambda: check_task_risk_sections(task_file), "3/13 风险扩展校验"),
                 (lambda: check_scope_lock(task_file, sage_root), "10/13 范围锁定校验"),
                 (lambda: check_evidence_complete(task_file), "12/13 证据链校验"),
                 (lambda: check_review_complete(task_file), "13/13 盲审结果校验")
