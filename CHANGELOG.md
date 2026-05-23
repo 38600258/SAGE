@@ -2,10 +2,13 @@
 
 > 只增不改。按版本号组织。遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 格式。
 
-## [Unreleased]
-
-### Added
-- T-002: 订单列表 Cursor 分页 API（开发中）
+## [Unreleased] 📝 Process 沉淀跨项目 SAGE 实战经验 (TBD) - 2026-05-23 20:22:40
+- 沉淀跨项目 SAGE 实战经验：版本号判定规则、完整时间戳记录、独立盲审绝对路径规则、收尾补丁版本归属。
+- 更新任务模板，要求任务元数据和各阶段标题记录带时区的完整时间戳。
+- 更新 reviewer/closer 提示词，明确盲审必须使用 `REPO_ROOT` / `TASK_PATH` 绝对路径，版本号以独立交付物为边界。
+- 将 `docs/project/HANDOVER-GUIDE.md` 去业务化，改为 SAGE 通用项目交接指南。
+- 修复 `scripts/sage_linter.py` 对带时间阶段标题、标题括号和盲审小标题的兼容性。
+- 新增 `--allow-template-changes`，允许模板/流程规范任务显式放行模板变更。
 
 ---
 
