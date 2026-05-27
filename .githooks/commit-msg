@@ -11,7 +11,6 @@ PYTHON_BIN=""
 for candidate in \
   ".venv/Scripts/python.exe" \
   ".venv/bin/python" \
-  "D:/Dev/Code/cj-saas/.codex-venv/Scripts/python.exe" \
   "python3" \
   "python" \
   "py"

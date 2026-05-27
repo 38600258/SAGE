@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SAGE 工作流通用检查器 (SAGE Linter)
+"""SAGE 工作流检查器 (SAGE Linter)
 
 此脚本集成了方法论中要求的所有 13 个检查器，不依赖任何第三方 Python 库，
 仅使用标准库及本地 git 命令。可以在任何智能体或人类开发流程中独立运行。
@@ -9,14 +9,27 @@ SAGE = Steer, Agent Goes Execute (人类掌舵，智能体执行)
 用法:
     python scripts/sage_linter.py --all
     python scripts/sage_linter.py --check-task docs/project/ACTIVE_TASK_T-XXX.md
+    python scripts/sage_linter.py --check-branch         # 分支隔离与命名校验
+    python scripts/sage_linter.py --check-scope          # hooks 高频调用
     python scripts/sage_linter.py --check-commit-msg .git/COMMIT_EDITMSG
+    python scripts/sage_linter.py --check-freshness      # /schedule cron 定期调用
+    python scripts/sage_linter.py --check-links          # 交叉引用单独校验
+    python scripts/sage_linter.py --all --format json    # JSON 结构化输出
+    python scripts/sage_linter.py --all --artifact        # Markdown 报告
+
+退出码:
+    0 = 全部通过
+    1 = 有警告（但无阻断）
+    2 = 有阻断性问题
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # ==============================================================================
@@ -26,9 +39,12 @@ from pathlib import Path
 # 元文件前缀与文件名（范围锁定和 CHANGELOG 校验中需排除的非项目源文件）
 _META_PREFIXES = ("docs/", "templates/", "archive/", "scripts/", "prompts/")
 _META_EXACT = {
-    "AGENTS.md", "ARCHITECTURE.md", "CHANGELOG.md",
+    "AGENTS.md", "AGENTS.override.md", "ARCHITECTURE.md", "CHANGELOG.md", "GEMINI.md",
     ".gitignore", ".env", ".editorconfig",
 }
+
+# 是否从 hooks 调用（环境变量 ANTIGRAVITY_HOOK=1 时自动精简输出）
+_IS_HOOK = os.environ.get("ANTIGRAVITY_HOOK") == "1"
 
 
 def _is_meta_file(filepath):
@@ -51,8 +67,11 @@ def _is_meta_file(filepath):
 def run_git_cmd(args, cwd=None):
     """运行 git 命令并返回输出，失败时返回空字符串"""
     try:
+        git_args = ["git"]
+        if cwd:
+            git_args.extend(["-c", f"safe.directory={Path(cwd).as_posix()}"])
         res = subprocess.run(
-            ["git"] + args,
+            git_args + args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -92,8 +111,163 @@ def get_file_lines(path):
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             return f.readlines()
     except Exception as e:
-        print(f"🛑 无法读取文件 {path}: {e}")
+        if not _IS_HOOK:
+            print(f"🛑 无法读取文件 {path}: {e}")
         return []
+
+# ==============================================================================
+# 结果收集器（支持多格式输出）
+# ==============================================================================
+
+class CheckResult:
+    """单个检查器的结果"""
+    __slots__ = ("checker", "status", "message")
+
+    def __init__(self, checker, status, message):
+        self.checker = checker      # 检查器名称
+        self.status = status        # "pass" | "warn" | "fail"
+        self.message = message      # 详细信息
+
+    def to_dict(self):
+        return {"checker": self.checker, "status": self.status, "message": self.message}
+
+    def to_json(self):
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+
+class ResultCollector:
+    """收集所有检查结果并按指定格式输出"""
+
+    def __init__(self, fmt="text"):
+        self.fmt = fmt              # "text" | "json" | "artifact"
+        self.results = []
+
+    def add(self, checker_name, ok, message):
+        """添加一个检查结果。ok=True 且含 ⚠️ 时视为 warn，否则 pass/fail"""
+        if ok and "⚠️" in message:
+            status = "warn"
+        elif ok:
+            status = "pass"
+        else:
+            status = "fail"
+        self.results.append(CheckResult(checker_name, status, message))
+
+    @property
+    def has_fail(self):
+        return any(r.status == "fail" for r in self.results)
+
+    @property
+    def has_warn(self):
+        return any(r.status == "warn" for r in self.results)
+
+    def exit_code(self):
+        """退出码语义：0=全部通过, 1=有警告, 2=有阻断"""
+        if self.has_fail:
+            return 2
+        if self.has_warn:
+            return 1
+        return 0
+
+    def flush_text(self):
+        """以纯文本格式输出所有结果"""
+        warns = []
+        for r in self.results:
+            icon = {"pass": "🟢", "warn": "🟡", "fail": "🔴"}[r.status]
+            tag = {"pass": "OK", "warn": "WARN", "fail": "FAIL"}[r.status]
+            if r.status == "warn":
+                warns.append(r.message)
+                print(f"  {icon} {r.checker}: {tag}")
+            elif r.status == "pass":
+                print(f"  {icon} {r.checker}: {r.message}")
+            else:
+                print(f"  {icon} {r.checker}: {tag}\n    👉 {r.message}")
+        if warns:
+            print("\n💡 警告细节:")
+            for w in warns:
+                print(w)
+
+    def flush_json(self):
+        """以 JSON 格式输出所有结果"""
+        output = {
+            "summary": {
+                "total": len(self.results),
+                "pass": sum(1 for r in self.results if r.status == "pass"),
+                "warn": sum(1 for r in self.results if r.status == "warn"),
+                "fail": sum(1 for r in self.results if r.status == "fail"),
+                "exit_code": self.exit_code(),
+            },
+            "results": [r.to_dict() for r in self.results]
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+
+    def flush_artifact(self):
+        """以 Markdown artifact 格式输出完整报告"""
+        total = len(self.results)
+        passes = sum(1 for r in self.results if r.status == "pass")
+        warns = sum(1 for r in self.results if r.status == "warn")
+        fails = sum(1 for r in self.results if r.status == "fail")
+
+        lines = [
+            "# 🔍 SAGE Linter 扫描报告",
+            "",
+            f"> 扫描时间: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+            "## 摘要",
+            "",
+            f"| 指标 | 数值 |",
+            f"|------|------|",
+            f"| 检查器总数 | {total} |",
+            f"| ✅ 通过 | {passes} |",
+            f"| ⚠️ 警告 | {warns} |",
+            f"| ❌ 阻断 | {fails} |",
+            f"| 退出码 | {self.exit_code()} |",
+            "",
+            "## 详细结果",
+            "",
+            "| # | 检查器 | 状态 | 详情 |",
+            "|---|--------|------|------|",
+        ]
+        for i, r in enumerate(self.results, 1):
+            icon = {"pass": "✅", "warn": "⚠️", "fail": "❌"}[r.status]
+            # 在 Markdown 表格中转义管道符和换行
+            msg = r.message.replace("|", "\\|").replace("\n", " ")
+            if len(msg) > 120:
+                msg = msg[:117] + "..."
+            lines.append(f"| {i} | {r.checker} | {icon} | {msg} |")
+
+        # 失败项详情展开
+        fail_results = [r for r in self.results if r.status == "fail"]
+        if fail_results:
+            lines.append("")
+            lines.append("## ❌ 阻断项详情")
+            for r in fail_results:
+                lines.append("")
+                lines.append(f"### {r.checker}")
+                lines.append("")
+                lines.append(r.message)
+
+        # 警告项详情展开
+        warn_results = [r for r in self.results if r.status == "warn"]
+        if warn_results:
+            lines.append("")
+            lines.append("## ⚠️ 警告项详情")
+            for r in warn_results:
+                lines.append("")
+                lines.append(f"### {r.checker}")
+                lines.append("")
+                lines.append(r.message)
+
+        print("\n".join(lines))
+
+    def flush(self):
+        """按配置的格式输出"""
+        if self.fmt == "json":
+            self.flush_json()
+        elif self.fmt == "artifact":
+            self.flush_artifact()
+        else:
+            self.flush_text()
+
 
 # ==============================================================================
 # 13 个检查器核心实现
@@ -219,7 +393,7 @@ def check_task_risk_sections(task_file):
 
     return True, f"风险分级扩展项校验通过 (风险等级: {risk_level})"
 
-def check_git_branch_isolation(cwd=None):
+def check_git_branch_isolation(cwd=None, allow_protected=False):
     """4. 分支隔离校验: 校验当前是否处于受保护的主干分支上开发"""
     curr_branch = run_git_cmd(["branch", "--show-current"], cwd)
     if not curr_branch:
@@ -234,9 +408,32 @@ def check_git_branch_isolation(cwd=None):
 
     protected_branches = ["main", "master", "dev", "develop", "release"]
     if curr_branch in protected_branches:
+        if allow_protected:
+            return True, f"受保护分支 '{curr_branch}' 已由显式授权参数放行。"
         return False, f"🛑 隔离红线违规：当前处于受保护的分支 '{curr_branch}'。所有开发必须在独立功能分支上进行！"
 
-    return True, f"分支隔离校验通过 (当前分支: {curr_branch})"
+    allowed_patterns = [
+        r"^fix/l0-[a-z0-9][a-z0-9-]*$",
+        r"^docs/l0-[a-z0-9][a-z0-9-]*$",
+        r"^chore/l0-[a-z0-9][a-z0-9-]*$",
+        r"^style/l0-[a-z0-9][a-z0-9-]*$",
+        r"^feat/t-\d{3,}-[a-z0-9][a-z0-9-]*$",
+        r"^feature/[Tt]-\d{3,}-[a-z0-9][a-z0-9-]*$",
+        r"^fix/t-\d{3,}-[a-z0-9][a-z0-9-]*$",
+        r"^docs/t-\d{3,}-[a-z0-9][a-z0-9-]*$",
+        r"^chore/t-\d{3,}-[a-z0-9][a-z0-9-]*$",
+        r"^refactor/t-\d{3,}-[a-z0-9][a-z0-9-]*$",
+    ]
+    if not any(re.match(pat, curr_branch) for pat in allowed_patterns):
+        return False, (
+            f"🛑 分支命名违规：当前分支 '{curr_branch}' 不符合 SAGE 通用分支规范。\n"
+            "允许格式: L1+ 使用 feat/t-XXX-name, fix/t-XXX-name, docs/t-XXX-name, "
+            "chore/t-XXX-name, refactor/t-XXX-name；兼容旧功能分支 feature/T-XXX-name；"
+            "L0 使用 fix/l0-name, docs/l0-name, "
+            "chore/l0-name, style/l0-name。"
+        )
+
+    return True, f"分支隔离与命名校验通过 (当前分支: {curr_branch})"
 
 
 def check_commit_message(message_file):
@@ -283,6 +480,7 @@ def check_commit_message(message_file):
 
     return True, f"提交信息校验通过: {subject}"
 
+
 def check_t2_document_lines(docs_dir):
     """5. T2 文档体积校验: 检查 docs/ guides 下的文件行数是否超过 500 行"""
     docs_path = Path(docs_dir)
@@ -292,6 +490,10 @@ def check_t2_document_lines(docs_dir):
     over_limit_files = []
     # 递归查找 guides 目录下的 md 文件
     for md_file in docs_path.glob("**/guides/**/*.md"):
+        # 排除只读/第三方参考目录
+        fp_posix = md_file.as_posix()
+        if "cj-claw-ref" in fp_posix or "node_modules" in fp_posix:
+            continue
         lines = get_file_lines(md_file)
         if len(lines) > 500:
             over_limit_files.append((md_file, len(lines)))
@@ -305,19 +507,19 @@ def check_t2_document_lines(docs_dir):
     return True, "T2 文档体积校验通过 (所有规范文档均控制在 500 行以内)"
 
 def check_document_freshness(docs_dir, stale_days=30):
-    """6. 文档新鲜度扫描: 检查 docs 下是否存在超过 30 天未更新的陈旧文档"""
+    """6. 文档新鲜度扫描: 检查 docs 下是否存在超过 N 天未更新的陈旧文档"""
     docs_path = Path(docs_dir)
     if not docs_path.exists():
         return True, f"文档目录不存在，跳过新鲜度扫描: {docs_dir}"
 
-    import time
     now = time.time()
     stale_secs = stale_days * 24 * 3600
     stale_files = []
 
     for md_file in docs_path.glob("**/*.md"):
-        # 排除已归档的任务
-        if "architecture/tasks" in md_file.as_posix() or "archive" in md_file.as_posix():
+        # 排除已归档的任务和第三方参考目录
+        fp_posix = md_file.as_posix()
+        if "architecture/tasks" in fp_posix or "archive" in fp_posix or "cj-claw-ref" in fp_posix or "node_modules" in fp_posix:
             continue
 
         # 优先使用 git log 获取最后修改时间
@@ -339,6 +541,7 @@ def check_document_freshness(docs_dir, stale_days=30):
         return True, f"⚠️ 新鲜度警告：\n{msg}"  # 警告级别，不阻塞流程
 
     return True, "文档新鲜度校验通过 (所有活跃文档均保持新鲜)"
+
 
 def check_templates_pristine(templates_dir, cwd=None):
     """7. 模板完整性守护: 检测 templates/ 目录下的模板是否被意外篡改"""
@@ -397,9 +600,6 @@ def check_append_only(file_path, cwd=None):
         return True, f"文件不存在，跳过只增不改校验: {file_path}"
 
     # [FIX BUG-6] 区分「真正的历史内容删除」与「仅换行符变化的误报」
-    # 场景：在文件末尾追加新行时，如果原文件最后一行没有尾换行符，
-    # git diff 会把旧最后一行标为 - (删除) 并在 + 中原样出现（仅添加了换行符）。
-    # 旧实现会把这种情况误判为"删除历史记录"。
     rel_path = str(path.relative_to(Path(cwd) if cwd else Path.cwd())).replace("\\", "/")
     diff_output = run_git_cmd(["diff", "-U0", rel_path], cwd)
     if not diff_output:
@@ -454,8 +654,6 @@ def check_scope_lock(task_file, cwd=None):
     writable_text = writable_match.group(1).strip()
 
     # [FIX BUG-4] 优先提取反引号包裹的路径（最严格、最不易误匹配）
-    # 旧实现使用 [\w\-./\\]+ 正则，会把自然语言描述中的词也当成文件路径，
-    # 无意中扩大可写范围——相当于给智能体一把自行提权的钥匙。
     writable_files = set(re.findall(r'`([^`]+)`', writable_text))
     # 降级：提取包含 / 或文件扩展名的路径模式
     if not writable_files:
@@ -522,8 +720,9 @@ def check_cross_links(scan_dir):
 
     broken_links = []
     for md_file in scan_path.glob("**/*.md"):
-        # 忽略归档目录
-        if "archive" in md_file.as_posix():
+        # 忽略归档、只读参考及依赖目录
+        fp_posix = md_file.as_posix()
+        if "archive" in fp_posix or "cj-claw-ref" in fp_posix or "node_modules" in fp_posix:
             continue
 
         content = "".join(get_file_lines(md_file))
@@ -531,10 +730,28 @@ def check_cross_links(scan_dir):
         links = re.findall(r'\[[^\]]*\]\(([^)]+)\)', content)
 
         for link in links:
-            # 排除网络链接和锚点链接
-            if link.startswith("http://") or link.startswith("https://") or link.startswith("mailto:") or link.startswith("#"):
+            # 排除普通网络链接和锚点链接，但保留本地 file:// 链接
+            if (link.startswith("http://") or link.startswith("https://") or
+                link.startswith("mailto:") or link.startswith("#")):
                 continue
 
+            # 处理本地绝对文件协议：file://
+            if link.startswith("file://"):
+                link_clean = link[7:]
+                # Windows 环境：如果开头是 /D:/... 或者是 D:/...
+                if link_clean.startswith("/") and len(link_clean) > 2 and link_clean[2] == ":":
+                    link_clean = link_clean[1:]
+                # 移除可能存在的锚点/参数
+                link_clean = link_clean.split("#")[0].split("?")[0].strip()
+                if not link_clean:
+                    continue
+                # 直接检查绝对路径在文件系统中是否存在
+                target_path = Path(link_clean)
+                if not target_path.exists():
+                    broken_links.append((md_file, link, link_clean))
+                continue
+
+            # 正常本地相对路径处理
             # 去掉参数和锚点后缀，如 path/to/file.md#L12
             link_clean = link.split("#")[0].split("?")[0].strip()
             if not link_clean:
@@ -599,7 +816,6 @@ def check_evidence_complete(task_file):
         return False, msg
 
     return True, "证据链完整性校验通过 (自动化测试与 Lint 证据已勾选确认)"
-
 
 def check_review_complete(task_file):
     """13. 盲审结果完整性: L2/L3 任务必须写入计划评审与代码评审报告"""
@@ -669,10 +885,65 @@ def check_review_complete(task_file):
         return False, (
             f"🛑 盲审结果缺失：风险等级为 {risk_level}，但以下章节未写入有效审查报告："
             + "、".join(missing)
-            + "。独立 reviewer 必须确认 TASK 文档对应章节已写入 OK/WARN/BLOCK 等 Markdown 审查结果。"
+            + "。调用 agy 后必须确认 TASK 文档对应章节已写入 OK/WARN/BLOCK 等 Markdown 审查结果，"
+            + "否则不得继续流转。"
         )
 
     return True, f"盲审结果完整性校验通过 (风险等级: {risk_level})"
+
+def check_model_metadata(task_file):
+    """14. 模型元数据校验: 验证活跃 TASK 文档元数据中是否已记录"使用模型"字段"""
+    task_path = Path(task_file)
+    if not task_path.exists():
+        return False, f"任务文档不存在: {task_file}"
+
+    content = "".join(get_file_lines(task_path))
+
+    # 提取"使用模型"字段
+    model_match = re.search(r'-\s*\*\*使用模型\*\*\s*[:：]\s*(.*)', content)
+    if not model_match:
+        # 兼容不加粗的写法
+        model_match = re.search(r'使用模型\s*[:：]\s*(.*)', content)
+
+    if not model_match:
+        return False, "任务文档元数据中未找到\"使用模型\"字段。请在任务元数据中记录实际使用的模型。"
+
+    model_value = model_match.group(1).strip()
+
+    # 检测空值或占位符文本
+    placeholder_patterns = [
+        r'^\s*$',                           # 空值
+        r'^\[.*\]$',                        # 方括号占位符 [填写实际使用的模型]
+        r'待填',                            # 待填
+        r'TBD',                             # TBD
+        r'N/?A',                            # N/A
+        r'^[-—]+$',                         # 破折号占位
+        r'^\(.*\)$',                        # 括号占位符
+        r'填写',                            # 包含"填写"
+    ]
+
+    for pat in placeholder_patterns:
+        if re.search(pat, model_value, re.IGNORECASE):
+            return False, (
+                f"⚠️ 任务文档元数据中的\"使用模型\"字段仍为占位符文本: \"{model_value}\"。"
+                f"\n请填写实际使用的模型名称（如强推理模型、快速编码模型、agy CLI reviewer 等）。"
+            )
+
+    return True, f"模型元数据校验通过 (使用模型: {model_value})"
+
+
+# ==============================================================================
+# 活跃任务定位辅助
+# ==============================================================================
+
+def find_active_task(sage_root):
+    """在项目中寻找当前活跃任务文档，返回 Path 或 None"""
+    # 优先在 docs/project/ 下查找
+    active_tasks = list((sage_root / "docs" / "project").glob("ACTIVE_TASK_T-*.md"))
+    if not active_tasks:
+        # 兼容性寻找根目录下的活跃任务
+        active_tasks = list(sage_root.glob("ACTIVE_TASK_T-*.md"))
+    return active_tasks[0] if active_tasks else None
 
 
 # ==============================================================================
@@ -680,16 +951,66 @@ def check_review_complete(task_file):
 # ==============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="SAGE 工作流多功能 Linter (通用版)")
+    parser = argparse.ArgumentParser(
+        description="SAGE 工作流检查器",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "示例:\n"
+            "  python scripts/sage_linter.py --all                  # 全量扫描\n"
+            "  python scripts/sage_linter.py --check-branch         # 分支隔离与命名\n"
+            "  python scripts/sage_linter.py --check-scope          # 范围锁定 (hooks 高频)\n"
+            "  python scripts/sage_linter.py --check-commit-msg .git/COMMIT_EDITMSG\n"
+            "  python scripts/sage_linter.py --check-freshness      # 新鲜度 (cron 定期)\n"
+            "  python scripts/sage_linter.py --check-links          # 交叉引用\n"
+            "  python scripts/sage_linter.py --all --allow-template-changes  # 规范任务允许模板变更\n"
+            "  python scripts/sage_linter.py --all --format json    # JSON 输出\n"
+            "  python scripts/sage_linter.py --all --artifact        # Markdown 报告\n"
+            "\n退出码: 0=通过, 1=警告, 2=阻断"
+        )
+    )
     parser.add_argument("--check-task", help="验证指定的活跃任务文档结构与规范")
     parser.add_argument("--all", action="store_true", help="在当前目录下运行一键全量工作流校验")
-    parser.add_argument("--stale-days", type=int, default=30, help="文档新鲜度天数门限 (默认 30 天)")
     parser.add_argument("--allow-template-changes", action="store_true",
                         help="允许模板文件变更（仅限模板/流程规范任务使用）")
+    parser.add_argument("--allow-protected-branch", action="store_true",
+                        help="允许在已授权的合并/推送阶段对受保护分支运行全量门禁")
+    parser.add_argument("--stale-days", type=int, default=30, help="文档新鲜度天数门限 (默认 30 天)")
+    # Hooks / CI 单项参数
+    parser.add_argument("--check-branch", action="store_true",
+                        help="仅执行检查器 #4（分支隔离与 SAGE 通用分支命名）")
+    parser.add_argument("--check-scope", action="store_true",
+                        help="仅执行检查器 #10（范围锁定），供 hooks 高频调用")
     parser.add_argument("--check-commit-msg",
                         help="检查提交信息文件，要求 Conventional Commit 标题描述包含中文")
+    parser.add_argument("--check-freshness", action="store_true",
+                        help="仅执行检查器 #6（新鲜度扫描），供 /schedule cron 定期调用")
+    parser.add_argument("--check-links", action="store_true",
+                        help="仅执行检查器 #11（交叉引用验证）")
+    parser.add_argument("--format", choices=["text", "json", "artifact"], default="text",
+                        help="输出格式选项 (默认 text)")
+    parser.add_argument("--artifact", action="store_true",
+                        help="等价于 --format artifact，生成 Markdown 报告到 stdout")
+    parser.add_argument("--antigravity", action="store_true",
+                        help="兼容旧参数：等价于 --artifact")
 
     args = parser.parse_args()
+
+    # --artifact / --antigravity 等价于 --format artifact
+    if args.artifact or args.antigravity:
+        args.format = "artifact"
+
+    # Hooks 感知：SAGE_HOOK=1 或 ANTIGRAVITY_HOOK=1 时自动使用 json 格式（除非显式指定）
+    if _IS_HOOK and args.format == "text":
+        args.format = "json"
+
+    # 判断是否为单项快速检查模式
+    is_single_check = (
+        args.check_branch
+        or args.check_scope
+        or bool(args.check_commit_msg)
+        or args.check_freshness
+        or args.check_links
+    )
 
     # 自动定位项目路径
     cwd = Path.cwd()
@@ -702,18 +1023,11 @@ def main():
             break
 
     if not sage_root:
-        print("🛑 错误：无法定位 SAGE 项目根目录（未找到 AGENTS.md）。请在项目根目录下运行此脚本。")
-        sys.exit(1)
-
-    if args.check_commit_msg:
-        ok, msg = check_commit_message(args.check_commit_msg)
-        if ok:
-            print(f"提交信息中文校验通过: {msg}")
-            sys.exit(0)
-        print(f"提交信息中文校验失败: {msg}", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"🔍 正在初始化 SAGE Linter，工作根目录: {sage_root}\n")
+        if args.format == "json":
+            print(json.dumps({"error": "无法定位 SAGE 项目根目录（未找到 AGENTS.md）"}, ensure_ascii=False))
+        else:
+            print("🛑 错误：无法定位 SAGE 项目根目录（未找到 AGENTS.md）。请在项目根目录下运行此脚本。")
+        sys.exit(2)
 
     # 获取常用的路径引用
     template_file = sage_root / "templates" / "TASK-TEMPLATE.md"
@@ -722,18 +1036,56 @@ def main():
     changelog_file = sage_root / "CHANGELOG.md"
     decision_log_file = sage_root / "docs" / "project" / "DECISION_LOG.md"
 
-    success = True
-    warnings = []
+    # 创建结果收集器
+    collector = ResultCollector(fmt=args.format)
 
-    # ==========================================================================
+    # ======================================================================
+    # 单项快速检查模式（供 hooks / cron 高频调用）
+    # ======================================================================
+    if is_single_check:
+        if args.check_branch:
+            ok, msg = check_git_branch_isolation(sage_root, args.allow_protected_branch)
+            collector.add("4. 分支隔离与命名校验", ok, msg)
+
+        if args.check_scope:
+            task_file = find_active_task(sage_root)
+            if task_file:
+                ok, msg = check_scope_lock(task_file, sage_root)
+                collector.add("10. 范围锁定校验", ok, msg)
+            else:
+                collector.add("10. 范围锁定校验", True, "未发现活跃任务文档，跳过范围锁定校验。")
+
+        if args.check_commit_msg:
+            ok, msg = check_commit_message(args.check_commit_msg)
+            collector.add("15. 提交信息中文校验", ok, msg)
+
+        if args.check_freshness:
+            ok, msg = check_document_freshness(docs_dir, args.stale_days)
+            collector.add("6. 文档新鲜度扫描", ok, msg)
+
+        if args.check_links:
+            ok, msg = check_cross_links(sage_root)
+            collector.add("11. 交叉引用校验", ok, msg)
+
+        collector.flush()
+        sys.exit(collector.exit_code())
+
+    # ======================================================================
+    # 非单项模式：打印 banner（仅 text 格式）
+    # ======================================================================
+    if args.format == "text":
+        print(f"🔍 正在初始化 SAGE Linter，工作根目录: {sage_root}\n")
+
+    # ======================================================================
     # 场景 A: 验证特定的活跃任务
-    # ==========================================================================
+    # ======================================================================
     if args.check_task:
         task_file = Path(args.check_task)
         if not task_file.is_absolute():
             task_file = (sage_root / task_file).resolve()
 
-        print(f"--- 💡 验证活跃任务文档: {task_file.name} ---")
+        if args.format == "text":
+            print(f"--- 💡 验证活跃任务文档: {task_file.name} ---")
 
         # 运行任务特有关联校验
         checkers = [
@@ -742,133 +1094,107 @@ def main():
             (lambda: check_task_risk_sections(task_file), "3. 风险扩展校验"),
             (lambda: check_scope_lock(task_file, sage_root), "10. 范围锁定校验"),
             (lambda: check_evidence_complete(task_file), "12. 证据链完整校验"),
-            (lambda: check_review_complete(task_file), "13. 盲审结果校验")
+            (lambda: check_review_complete(task_file), "13. 盲审结果校验"),
+            (lambda: check_model_metadata(task_file), "14. 模型元数据校验"),
         ]
 
         for func, name in checkers:
             ok, msg = func()
-            if ok:
-                print(f"  🟢 {name}: OK ({msg})")
-            else:
-                print(f"  🔴 {name}: FAIL\n    👉 {msg}")
-                success = False
-        print()
+            collector.add(name, ok, msg)
 
-    # ==========================================================================
+        if args.format == "text":
+            collector.flush()
+            print()
+
+    # ======================================================================
     # 场景 B: 一键全量校验 (一键运行全部 13 个检查器)
-    # ==========================================================================
+    # ======================================================================
     if args.all or not args.check_task:
-        if not args.all:
-            print("💡 提示：未指定特定参数，默认执行全量一键静态扫描 (--all)\n")
+        # 如果 check_task 已运行，需要一个新的收集器用于全量（或合并）
+        # 这里我们沿用同一个收集器，让所有结果汇总
+        if not args.all and not args.check_task:
+            if args.format == "text":
+                print("💡 提示：未指定特定参数，默认执行全量一键静态扫描 (--all)\n")
 
-        print("===================== 🚀 开始工作流静态扫描 =====================")
+        if args.format == "text":
+            print("===================== 🚀 开始工作流静态扫描 =====================")
 
         # 寻找当前活跃任务文档
-        active_tasks = list((sage_root / "docs" / "project").glob("ACTIVE_TASK_T-*.md"))
-        if not active_tasks:
-            # 兼容性寻找当前目录下的活跃任务
-            active_tasks = list(sage_root.glob("ACTIVE_TASK_T-*.md"))
-
-        task_file = active_tasks[0] if active_tasks else None
+        task_file = find_active_task(sage_root)
         if task_file:
-            print(f"发现活跃任务文档: {task_file.name}")
+            if args.format == "text":
+                print(f"发现活跃任务文档: {task_file.name}")
         else:
-            print("ℹ️ 未发现当前活跃任务文档 (ACTIVE_TASK_T-*.md)，跳过任务级细节校验。")
+            if args.format == "text":
+                print("ℹ️ 未发现当前活跃任务文档 (ACTIVE_TASK_T-*.md)，跳过任务级细节校验。")
 
         # 1. 物理分支隔离校验
-        ok, msg = check_git_branch_isolation(sage_root)
-        if ok:
-            print(f"🟢 [4/13] 分支隔离校验: {msg}")
-        else:
-            print(f"🔴 [4/13] 分支隔离校验: FAIL\n    👉 {msg}")
-            success = False
+        ok, msg = check_git_branch_isolation(sage_root, args.allow_protected_branch)
+        collector.add("[4/13] 分支隔离校验", ok, msg)
 
         # 2. 模板守护校验
         if args.allow_template_changes:
             ok, msg = True, "模板变更已由 --allow-template-changes 显式允许"
         else:
             ok, msg = check_templates_pristine(templates_dir, sage_root)
-        if ok:
-            print(f"🟢 [7/13] 模板完整校验: {msg}")
-        else:
-            print(f"🔴 [7/13] 模板完整校验: FAIL\n    👉 {msg}")
-            success = False
+        collector.add("[7/13] 模板完整校验", ok, msg)
 
         # 3. 只增不改日志校验
         ok, msg = check_append_only(decision_log_file, sage_root)
-        if ok:
-            print(f"🟢 [9/13] 日志增改限制: {msg}")
-        else:
-            print(f"🔴 [9/13] 日志增改限制: FAIL\n    👉 {msg}")
-            success = False
+        collector.add("[9/13] 日志增改限制", ok, msg)
 
         # 4. CHANGELOG 联动更新校验
         ok, msg = check_changelog_update(changelog_file, sage_root)
-        if ok:
-            print(f"🟢 [8/13] 日志更新联动: {msg}")
-        else:
-            print(f"🔴 [8/13] 日志更新联动: FAIL\n    👉 {msg}")
-            success = False
+        collector.add("[8/13] 日志更新联动", ok, msg)
 
         # 5. T2 规范体积校验
         ok, msg = check_t2_document_lines(docs_dir)
-        if ok:
-            print(f"🟢 [5/13] 规范文档体积: {msg}")
-        else:
-            print(f"🔴 [5/13] 规范文档体积: FAIL\n    👉 {msg}")
-            success = False
+        collector.add("[5/13] 规范文档体积", ok, msg)
 
-        # [FIX BUG-7] 6. 本地交叉引用验证 — 扫描整个项目根目录（不只是 docs/）
-        # 以覆盖 AGENTS.md、ARCHITECTURE.md 和方法论文件中的链接
+        # 6. 本地交叉引用验证 — 扫描整个项目根目录
         ok, msg = check_cross_links(sage_root)
-        if ok:
-            print(f"🟢 [11/13] 交叉引用校验: {msg}")
-        else:
-            print(f"🔴 [11/13] 交叉引用校验: FAIL\n    👉 {msg}")
-            success = False
+        collector.add("[11/13] 交叉引用校验", ok, msg)
 
         # 7. 文档新鲜度扫描 (警告级)
         ok, msg = check_document_freshness(docs_dir, args.stale_days)
-        if "⚠️" in msg:
-            warnings.append(msg)
-            print(f"🟡 [6/13] 文档新鲜扫描: WARNING (详见尾部输出)")
-        else:
-            print(f"🟢 [6/13] 文档新鲜扫描: {msg}")
+        collector.add("[6/13] 文档新鲜扫描", ok, msg)
 
         # [FIX DESIGN-3] 如果已通过 --check-task 单独校验过，不再重复执行任务级校验
         if task_file and not args.check_task:
-            print("\n--- 任务级细节深度扫描 ---")
+            if args.format == "text":
+                print("\n--- 任务级细节深度扫描 ---")
             task_checkers = [
-                (lambda: check_template_copy(task_file, template_file), "1/13 模板复制校验"),
-                (lambda: check_task_structure(task_file), "2/13 任务大纲校验"),
-                (lambda: check_task_risk_sections(task_file), "3/13 风险扩展校验"),
-                (lambda: check_scope_lock(task_file, sage_root), "10/13 范围锁定校验"),
-                (lambda: check_evidence_complete(task_file), "12/13 证据链校验"),
-                (lambda: check_review_complete(task_file), "13/13 盲审结果校验")
+                (lambda: check_template_copy(task_file, template_file), "[1/13] 模板复制校验"),
+                (lambda: check_task_structure(task_file), "[2/13] 任务大纲校验"),
+                (lambda: check_task_risk_sections(task_file), "[3/13] 风险扩展校验"),
+                (lambda: check_scope_lock(task_file, sage_root), "[10/13] 范围锁定校验"),
+                (lambda: check_evidence_complete(task_file), "[12/13] 证据链校验"),
+                (lambda: check_review_complete(task_file), "[13/14] 盲审结果校验"),
+                (lambda: check_model_metadata(task_file), "[14/14] 模型元数据校验"),
             ]
             for func, name in task_checkers:
                 ok, msg = func()
-                if ok:
-                    print(f"  🟢 {name}: OK ({msg})")
-                else:
-                    print(f"  🔴 {name}: FAIL\n    👉 {msg}")
-                    success = False
+                collector.add(name, ok, msg)
 
-        print("\n================================================================")
+        if args.format == "text":
+            print("\n================================================================")
 
-    # 输出新鲜度警告
-    if warnings:
-        print("\n💡 新鲜度扫描警告细节:")
-        for w in warnings:
-            print(w)
+    # ======================================================================
+    # 输出结果
+    # ======================================================================
+    collector.flush()
 
-    # 最终状态出口
-    if success:
-        print("\n🎉 恭喜！工作流静态扫描全部通过。可以安全进入下一阶段。")
-        sys.exit(0)
-    else:
-        print("\n❌ 扫描发现阻断级错误。请修正上述标红(🔴)项目后重试。")
-        sys.exit(1)
+    # 最终状态出口（text 格式额外打印总结行）
+    exit_code = collector.exit_code()
+    if args.format == "text":
+        if exit_code == 0:
+            print("\n🎉 恭喜！工作流静态扫描全部通过。可以安全进入下一阶段。")
+        elif exit_code == 1:
+            print("\n⚠️ 扫描发现警告项（非阻断）。建议关注上述标黄(🟡)项目。")
+        else:
+            print("\n❌ 扫描发现阻断级错误。请修正上述标红(🔴)项目后重试。")
+
+    sys.exit(exit_code)
 
 if __name__ == "__main__":
     main()

@@ -8,8 +8,13 @@
 
 - **任务编号 (ID)**: T-XXX
 - **任务描述**: (待填入)
-- **风险等级**: L1 / L2 / L3
-- **当前阶段**: ⚪ 待命
+- **风险等级**: L1 / L2 / L3（L0 不创建 TASK 文档）
+- **当前阶段**: init | plan-review | dev | code-review | close
+- **项目根目录**: (绝对路径，如 D:\Dev\Code\your-project)
+- **功能分支**: (分支名，如 feat/t-001-add-auth 或 docs/t-001-update-docs)
+- **执行通道配置**: docs/guides/execution-channels.md
+- **使用模型**: [填写实际使用的模型]
+- **工具会话 ID**: [自动填写，如 Antigravity 会话 ID / Codex thread]
 - **效能数据**:
   - 开始时间: (自动填入，格式：YYYY-MM-DDTHH:mm:ss+08:00)
   - 结束时间: (任务完结时填入，格式：YYYY-MM-DDTHH:mm:ss+08:00)
@@ -59,8 +64,8 @@
 - [ ] **评审意见**: (由 reviewer 填写)
 - [ ] **修正记录**: (如有修改)
 
-<!-- CLI/子智能体盲审时，必须提供 REPO_ROOT 和 TASK_PATH 的绝对路径；禁止只写“按仓库”或相对 prompts/reviewer.md。 -->
-<!-- 门禁：若本节未出现 OK/WARN/BLOCK 等有效审查报告，L2/L3 流程不得进入阶段 3。 -->
+<!-- 盲审按“执行通道配置”调用 CLI 或 subagent；Prompt 必须提供 REPO_ROOT、TASK_PATH、ROLE_PROMPT、PHASE，并要求 reviewer 写回本节。 -->
+<!-- 门禁：若本节未出现 OK/WARN/BLOCK 等有效审查报告，流程不得进入阶段 3。 -->
 
 ---
 
@@ -83,7 +88,7 @@
 - [ ] **评审反馈**:
 - [ ] **遗留问题与技术债**: (写入 5.1 节)
 
-<!-- 门禁：若本节未出现 OK/WARN/BLOCK 等有效审查报告，L2/L3 流程不得进入阶段 5。 -->
+<!-- 门禁：若本节未出现 OK/WARN/BLOCK 等有效审查报告，流程不得进入阶段 5。 -->
 
 ---
 
@@ -109,3 +114,4 @@
 - [ ] 版本号已更新
 - [ ] 任务现场已清理
 - [ ] Git 已提交
+- [ ] 使用模型已记录在元数据中
