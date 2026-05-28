@@ -64,7 +64,7 @@
 - [ ] **评审意见**: (由 reviewer 填写)
 - [ ] **修正记录**: (如有修改)
 
-<!-- 盲审按“执行通道配置”调用 CLI 或 subagent；Prompt 必须提供 REPO_ROOT、TASK_PATH、ROLE_PROMPT、PHASE，并要求 reviewer 写回本节。 -->
+<!-- 盲审按“执行通道配置”调用 CLI 或 subagent；Prompt 只提供 REPO_ROOT、TASK_PATH、ROLE_PROMPT、PHASE 等必要定位信息，其他调度信息从 TASK 元数据读取，并要求 reviewer 写回本节。 -->
 <!-- 门禁：若本节未出现 OK/WARN/BLOCK 等有效审查报告，流程不得进入阶段 3。 -->
 
 ---

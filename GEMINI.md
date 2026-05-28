@@ -14,7 +14,8 @@
 ### 盲审规范
 - reviewer/coder/closer 的 CLI 调用优先按 [execution-channels](docs/guides/execution-channels.md) 执行。
 - 默认 CLI 以执行通道文档为准；当前 reviewer 使用 Claude CLI，coder/closer 使用 Qwen CLI。
-- CLI 必须注入对应 `prompts/*.md` 作为角色规范，并显式提供 `REPO_ROOT`、`TASK_PATH`、`ROLE_PROMPT`、`PHASE`。
+- L0 不调用 CLI/subagent，由 main agent 直接执行。
+- L1 及以上 CLI 必须注入对应 `prompts/*.md` 作为角色规范，并显式提供 `REPO_ROOT`、`TASK_PATH`、`ROLE_PROMPT`、`PHASE`；其他调度信息从 TASK 元数据读取。
 - CLI 报告或执行结果必须写入 TASK 文档对应章节。
 
 ### Subagent 使用规范
@@ -38,7 +39,7 @@
 ### 模型选择
 - Orchestrator/Planner: 强推理模型（Opus/Pro-high），UI 选择
 - Reviewer/Coder/Closer: 按 `docs/guides/execution-channels.md` 配置的 CLI 或备选 subagent
-- Doc-gardener/Schedule: Gemini 3.5 Flash（固定）
+- Doc-gardener/Schedule: 低成本文档模型或工具默认模型
 - L1 任务: Flash 全流程 | L3 任务: Opus 全流程
 - 详细指南 → [docs/guides/model-selection.md](docs/guides/model-selection.md)
 
