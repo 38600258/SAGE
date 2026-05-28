@@ -50,9 +50,9 @@
 
 4. **角色契约**：`prompts/` 是角色契约唯一来源；skill/CLI/subagent 只能引用，不复制。
 
-5. **子代理派发门禁**：L1 及以上，TASK 文档 1.1~1.5 冻结后，方可派发 coder/closer 等执行型子代理；派发时传递 TASK 文档路径和对应角色提示词路径，任务等级以 TASK 元数据为准。L0 免除 TASK 文档，主代理直接执行。
+5. **子代理派发门禁**：L1 及以上，TASK 文档 1.1~1.5 冻结后，方可派发 coder/closer 等执行型子代理；派发时只传递必要定位信息（TASK 文档路径、角色提示词路径、阶段、仓库根目录），任务等级等调度信息以 TASK 元数据为准。L0 免除 TASK 文档，主代理直接执行，不派发 CLI/subagent。
 
-6. **执行通道协议**：L1 及以上，CLI/subagent 通过 TASK 文档元数据（风险等级、当前阶段、项目根目录、功能分支）获取调度信息；具体 CLI 命令从 [execution-channels](docs/guides/execution-channels.md) 读取，缺省按 L2。
+6. **执行通道协议**：L1 及以上，CLI/subagent 通过 TASK 文档元数据（风险等级、当前阶段、项目根目录、功能分支）获取调度信息；不得传递主线程讨论历史或额外隐式上下文；具体 CLI 命令从 [execution-channels](docs/guides/execution-channels.md) 读取，缺省按 L2。
 
 7. **编排校准**：阶段流转、外包边界不确定时，参考 `prompts/orchestrator.md` 编排细节。
 
