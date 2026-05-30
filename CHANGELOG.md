@@ -3,6 +3,11 @@
 > 只增不改。按版本号组织。遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 格式。
 > 注：历史条目原本只记录日期，迁移到单行标题格式时用 `00:00:00` 作为回溯补齐时间。
 
+## [0.3.2] 📝 Process 沉淀原生 subagent 优先执行通道 (T-007) - 2026-05-30 11:38:30
+- 将 SAGE 执行载体策略从 CLI 优先调整为能力优先：工具原生 subagent 可用时优先派发 reviewer/coder/closer，CLI 作为受控 fallback。
+- 更新执行通道规范，补充 subagent 派发模板、CLI fallback 规则、失败复核要求和成功标准。
+- 更新模型选择指南，明确模型选择与执行载体解耦，并定义 `base_instructions` / `model_messages` / subagent 配置的载体提示边界。
+- 更新 Codex 覆盖入口和模式库，沉淀“原生 subagent 优先”和“模型目录不承载角色契约”两条通用实践。
 ## [0.3.1] 📝 Process 明确覆盖入口与上下文传递契约 (T-005) - 2026-05-28 00:00:00
 - 明确工具默认覆盖入口必须自包含通用入口规则；`AGENTS.override.md` 需可替代 `AGENTS.md` 独立启动。
 - 明确 L0 由 Main Agent 直接执行，不创建 TASK，不调用 CLI/subagent。
@@ -56,3 +61,5 @@
 - PostgreSQL 数据库连接与基础配置
 - Docker Compose 开发环境配置
 - 基础目录结构（Controller / Service / Repository 分层）
+
+

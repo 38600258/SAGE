@@ -60,11 +60,12 @@
 ## Codex 覆盖规则
 1. 不另建 `CODEX.md`；本文件就是 Codex app 专用入口。
 2. 分支从项目开发基线分支切出：L1+ 使用 `feat|fix|docs|chore|refactor/t-XXX-*`；L0 可用 `fix|docs|chore|style/l0-*`；禁止工具名前缀。
-3. reviewer/coder/closer 可交给 CLI；优先按 `docs/guides/execution-channels.md` 的命令模板调用，项目可只改该文档替换 CLI。
-4. CLI Prompt 只提供 `REPO_ROOT`、`TASK_PATH`、`ROLE_PROMPT`、`PHASE` 等必要定位信息，并要求回写 TASK 对应章节；其他调度信息从 TASK 元数据读取。
-5. CLI 成功标准是 TASK/Git 状态出现有效产出；stdout 或退出码不能单独作为依据。CLI 不可用时，可用 Codex subagent 备选。
-6. Codex hooks 只作软防护；提交/推送前硬门禁以 Git hooks 和 `scripts/sage_linter.py` 为准。
-7. 越权命令、部署、外部网络或写出工作区，必须通过 Codex app 审批。
+3. reviewer/coder/closer 可交给原生 subagent 或 CLI；Codex app 默认优先按 `docs/guides/execution-channels.md` 的 subagent 派发模板调用，CLI 作为受控 fallback，项目可只改该文档替换执行载体。
+4. subagent/CLI Prompt 只提供 `REPO_ROOT`、`TASK_PATH`、`ROLE_PROMPT`、`PHASE` 等必要定位信息，并要求回写 TASK 对应章节；其他调度信息从 TASK 元数据读取。
+5. subagent/CLI 成功标准是 TASK/Git 状态出现有效产出；stdout、退出码或 subagent 回复不能单独作为依据。默认 subagent 不可用时，必须先复核现场并尝试修复；仍不可用时记录失败并切换 CLI fallback；CLI 也不可用时停止报告，由人类确认后才可改用 Main Agent fallback。
+6. `base_instructions`、`model_messages` 和 subagent 配置只属于载体提示层，不得复制角色契约或任务事实；模型身份与路由以 provider/shim 请求日志为准。
+7. Codex hooks 只作软防护；提交/推送前硬门禁以 Git hooks 和 `scripts/sage_linter.py` 为准。
+8. 越权命令、部署、外部网络或写出工作区，必须通过 Codex app 审批。
 
 ## 不可违反的约束
 1. 部署阶段必须人类授权，智能体严禁私自触发。
@@ -72,3 +73,4 @@
 3. 收尾阶段严禁新增功能（scope creep）。
 4. 合并到开发基线分支和生产主干的权力永远属于人类。
 5. 所有知识沉淀到仓库，不留在聊天或人脑中。
+
