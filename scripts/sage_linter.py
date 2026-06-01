@@ -99,7 +99,11 @@ def get_git_diff_files(cwd=None):
     # [FIX DESIGN-5] 解析 porcelain 全部状态码（??, A, M, AM, R 等），不只看 ??
     for line in out_porcelain.splitlines():
         if len(line) >= 3 and line[0:2].strip():
-            filepath = line[3:].strip().strip('"')
+            if line.startswith("?? ") or (len(line) > 2 and line[2] == " "):
+                filepath = line[3:].strip().strip('"')
+            else:
+                # 兼容部分 Windows/Git 输出中的紧凑短状态（如 "M path"）
+                filepath = line[2:].strip().strip('"')
             if filepath:
                 files.add(filepath)
 
@@ -371,13 +375,42 @@ def check_task_risk_sections(task_file):
 
         section_content = content[idx_13a:idx_14] if idx_14 != -1 else content[idx_13a:]
 
-        # [FIX BUG-2] 判定是否有实质内容：检测模板占位符格式 "标准 N: (如 ...)"
-        # 而不是用关键字黑名单过滤（黑名单方式可被简单改词绕过）
-        checkboxes = re.findall(r'-\s*\[\s*\]\s*(.+)', section_content)
-        placeholder_re = re.compile(r'^\s*标准\s*\d+\s*[:：]\s*[\(（]')
-        valid_items = [c for c in checkboxes if not placeholder_re.match(c.strip())]
-        if not valid_items:
-            return False, f"风险等级为 {risk_level}，但 ### 1.3a 验收标准 未填写具体的验收标准条目。"
+        # 新版验收标准必须是可证伪契约：AC-ID + [auto]/[manual] + 验证方式 + 证据位置。
+        # 兼容旧版 checkbox 的存在性检查，但 L2/L3 会要求至少一条新版 AC 映射。
+        ac_rows = []
+        for line in section_content.splitlines():
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if len(cells) >= 5 and re.fullmatch(r"AC-\d+", cells[0]):
+                ac_rows.append(cells[:5])
+
+        invalid_ac = []
+        auto_count = 0
+        manual_count = 0
+        placeholder_markers_ac = ["(如", "（如", "待填", "...", "可证伪验收标准", "验证方式", "证据位置"]
+        for ac_id, ac_type, criterion, verify, evidence in ac_rows:
+            if ac_type not in ["[auto]", "[manual]"]:
+                invalid_ac.append(f"{ac_id}: 类型必须为 [auto] 或 [manual]")
+            if ac_type == "[auto]":
+                auto_count += 1
+            if ac_type == "[manual]":
+                manual_count += 1
+            values = [criterion, verify, evidence]
+            if any(not value for value in values) or any(
+                any(marker in value for marker in placeholder_markers_ac) for value in values
+            ):
+                invalid_ac.append(f"{ac_id}: 验收标准、验证方式或证据位置仍为空或占位")
+
+        if not ac_rows:
+            return False, (
+                f"风险等级为 {risk_level}，但 ### 1.3a 验收标准 未使用 AC-ID 验收映射。"
+                "请为每条验收标准填写 AC-ID、[auto]/[manual]、验证方式和证据位置。"
+            )
+        if invalid_ac:
+            return False, "验收标准映射不完整：\n  - " + "\n  - ".join(invalid_ac)
+
+        acceptance_warning = ""
+        if manual_count > 0 and auto_count == 0:
+            acceptance_warning = " ⚠️ 验收标准全部为 [manual]，请确认不存在可自动化验证的关键约束。"
 
         # [FIX BUG-3] 检查 1.3b 风险矩阵：用多个占位符标记综合判定
         idx_13b = content.find("### 1.3b 风险矩阵")
@@ -391,7 +424,7 @@ def check_task_risk_sections(task_file):
         ):
             return False, f"风险等级为 {risk_level}，但 ### 1.3b 风险矩阵 未填写具体的风险防范矩阵。"
 
-    return True, f"风险分级扩展项校验通过 (风险等级: {risk_level})"
+    return True, f"风险分级扩展项校验通过 (风险等级: {risk_level})" + (acceptance_warning if risk_level in ["L2", "L3"] else "")
 
 def check_git_branch_isolation(cwd=None, allow_protected=False):
     """4. 分支隔离校验: 校验当前是否处于受保护的主干分支上开发"""
@@ -722,7 +755,7 @@ def check_cross_links(scan_dir):
     for md_file in scan_path.glob("**/*.md"):
         # 忽略归档、只读参考及依赖目录
         fp_posix = md_file.as_posix()
-        if "archive" in fp_posix or "cj-claw-ref" in fp_posix or "node_modules" in fp_posix:
+        if "archive" in fp_posix or "cj-claw-ref" in fp_posix or "node_modules" in fp_posix or "references" in fp_posix:
             continue
 
         content = "".join(get_file_lines(md_file))
@@ -931,6 +964,73 @@ def check_model_metadata(task_file):
 
     return True, f"模型元数据校验通过 (使用模型: {model_value})"
 
+def check_execution_channel_records(task_file):
+    """15. 阶段执行通道记录: L1+ 已到达阶段必须记录角色契约与执行通道证据"""
+    task_path = Path(task_file)
+    if not task_path.exists():
+        return False, f"任务文档不存在: {task_file}"
+
+    content = "".join(get_file_lines(task_path))
+    if "执行通道记录" not in content:
+        return True, "💡 提示：旧版任务文档未包含执行通道记录章节，跳过校验。"
+
+    risk_match = re.search(r'-\s*\*\*风险等级\*\*:\s*(L1|L2|L3)', content)
+    if not risk_match:
+        risk_match = re.search(r'风险等级\s*[:：]\s*(L1|L2|L3)', content)
+    risk_level = risk_match.group(1) if risk_match else "L2"
+
+    stage_match = re.search(r'-\s*\*\*当前阶段\*\*:\s*([a-z-]+)', content)
+    current_stage = stage_match.group(1).strip() if stage_match else "close"
+
+    stage_order = ["init", "plan-review", "dev", "code-review", "close"]
+    if current_stage not in stage_order:
+        return False, f"未知当前阶段: {current_stage}。请使用 init/plan-review/dev/code-review/close。"
+
+    reached = set(stage_order[: stage_order.index(current_stage) + 1])
+    required = [("1.0", "初始化")]
+    if risk_level in ("L2", "L3") and "plan-review" in reached:
+        required.append(("2.0", "计划评审"))
+    if "dev" in reached:
+        required.append(("3.0", "开发与验证"))
+    if risk_level in ("L2", "L3") and "code-review" in reached:
+        required.append(("4.0", "代码审查"))
+    if "close" in reached:
+        required.append(("5.0", "收尾归档"))
+
+    missing = []
+    incomplete = []
+    required_labels = ["角色契约", "执行通道", "偏离处理"]
+
+    for section_id, section_name in required:
+        pattern = rf"###\s+{re.escape(section_id)}\s+执行通道记录.*?(?=\n###\s+|\n##\s+|\Z)"
+        match = re.search(pattern, content, re.S)
+        if not match:
+            missing.append(f"{section_id} {section_name}")
+            continue
+        section = match.group(0)
+        for label in required_labels:
+            label_match = re.search(rf'-\s*\[\s*([xX\s])\s*\]\s*\*\*{label}\*\*:\s*(.+)', section)
+            if not label_match:
+                incomplete.append(f"{section_id} {section_name}: 缺少 {label}")
+                continue
+            checked, value = label_match.groups()
+            value = value.strip()
+            if checked.strip() == "":
+                incomplete.append(f"{section_id} {section_name}: {label} 未勾选")
+            elif not value or "待填" in value or "(填写" in value:
+                incomplete.append(f"{section_id} {section_name}: {label} 仍为占位")
+
+    if missing or incomplete:
+        msg = "🛑 阶段执行通道记录不完整：\n"
+        for item in missing:
+            msg += f"  - 缺少章节: {item}\n"
+        for item in incomplete:
+            msg += f"  - {item}\n"
+        msg += "L1+ 已到达阶段必须记录角色契约加载、执行通道和偏离/阻塞处理；不得主观绕过规范通道。"
+        return False, msg
+
+    return True, f"阶段执行通道记录校验通过 (当前阶段: {current_stage}, 风险等级: {risk_level})"
+
 
 # ==============================================================================
 # 活跃任务定位辅助
@@ -938,11 +1038,8 @@ def check_model_metadata(task_file):
 
 def find_active_task(sage_root):
     """在项目中寻找当前活跃任务文档，返回 Path 或 None"""
-    # 优先在 docs/project/ 下查找
+    # 活跃任务只允许放在 docs/project/；完成后归档到 docs/project/tasks/T-XXX.md
     active_tasks = list((sage_root / "docs" / "project").glob("ACTIVE_TASK_T-*.md"))
-    if not active_tasks:
-        # 兼容性寻找根目录下的活跃任务
-        active_tasks = list(sage_root.glob("ACTIVE_TASK_T-*.md"))
     return active_tasks[0] if active_tasks else None
 
 
@@ -1096,6 +1193,7 @@ def main():
             (lambda: check_evidence_complete(task_file), "12. 证据链完整校验"),
             (lambda: check_review_complete(task_file), "13. 盲审结果校验"),
             (lambda: check_model_metadata(task_file), "14. 模型元数据校验"),
+            (lambda: check_execution_channel_records(task_file), "15. 执行通道记录校验"),
         ]
 
         for func, name in checkers:
@@ -1126,7 +1224,7 @@ def main():
                 print(f"发现活跃任务文档: {task_file.name}")
         else:
             if args.format == "text":
-                print("ℹ️ 未发现当前活跃任务文档 (ACTIVE_TASK_T-*.md)，跳过任务级细节校验。")
+                print("ℹ️ 未发现当前活跃任务文档 (docs/project/ACTIVE_TASK_T-*.md)，跳过任务级细节校验。")
 
         # 1. 物理分支隔离校验
         ok, msg = check_git_branch_isolation(sage_root, args.allow_protected_branch)
@@ -1171,6 +1269,7 @@ def main():
                 (lambda: check_evidence_complete(task_file), "[12/13] 证据链校验"),
                 (lambda: check_review_complete(task_file), "[13/14] 盲审结果校验"),
                 (lambda: check_model_metadata(task_file), "[14/14] 模型元数据校验"),
+                (lambda: check_execution_channel_records(task_file), "[15/15] 执行通道记录校验"),
             ]
             for func, name in task_checkers:
                 ok, msg = func()

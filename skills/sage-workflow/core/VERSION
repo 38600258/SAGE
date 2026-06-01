@@ -1,0 +1,5 @@
+version: 1.0.0
+baseline_commit: 9de69c4
+release_date: 2026-06-01
+source: sage
+mode: default-distribution
