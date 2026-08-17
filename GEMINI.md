@@ -6,22 +6,22 @@
 ## 核心行为约束
 
 ### 任务文档策略
-- 仓库 `ACTIVE_TASK_T-XXX.md` 是唯一事实来源（Single Source of Truth）
+- 仓库 `docs/project/ACTIVE_TASK_T-XXX.md` 是活跃任务唯一事实来源（Single Source of Truth）；完成后归档到 `docs/project/tasks/T-XXX.md`
 - Antigravity artifact（implementation_plan/task/walkthrough）仅作为展示辅助层
 - 每个阶段结束时必须写入仓库 TASK 文档，artifact 从 TASK 文档派生
 - 会话中断时 TASK 文档必须完好保存在仓库中
 
 ### 盲审规范
-- reviewer/coder/closer 的 CLI 调用优先按 [execution-channels](docs/guides/execution-channels.md) 执行。
-- 默认 CLI 以执行通道文档为准；当前 reviewer 使用 Claude CLI，coder/closer 使用 Qwen CLI。
+- L1 及以上 reviewer/coder/closer 派发前运行 `uv run python skills/sage-workflow/core/scripts/dispatch_phase.py prepare`，adapter 使用项目实际工具配置。
+- `action=spawn_subagent` 时由 main agent 调用宿主原生 API；`action=run_cli` 时使用回执执行 `run-cli`。
 - L0 不调用 CLI/subagent，由 main agent 直接执行。
-- L1 及以上 CLI 必须注入对应 `prompts/*.md` 作为角色规范，并显式提供 `REPO_ROOT`、`TASK_PATH`、`ROLE_PROMPT`、`PHASE`；其他调度信息从 TASK 元数据读取。
-- CLI 报告或执行结果必须写入 TASK 文档对应章节。
+- 派发 prompt 只包含 `REPO_ROOT`、`TASK_PATH`、`ROLE_PROMPT`、`PHASE` 和可选 `DIFF_CMD`；其他调度信息从 TASK 元数据读取。
+- 执行完成后必须运行 `verify`；CLI/subagent 回复、stdout 或退出码不能单独作为成功依据。
 
 ### Subagent 使用规范
 - Orchestrator 角色由 main agent 天然承担，不创建独立 subagent
 - 研究任务使用 research subagent（Workspace: inherit）
-- reviewer/coder/closer 默认优先 CLI；CLI 不可用时使用对应 subagent 备选
+- reviewer/coder/closer 的实际通道和阶段模型由 adapter profile 决定；原生 subagent 可用时 main agent 按模型绑定自动调用，否则使用受控 CLI `{model}` 参数
 
 ### Artifact 使用规范
 - artifact 是展示辅助层，不是工作流的必需依赖
@@ -33,15 +33,15 @@
 - Artifact 仅用于人类阅读，不是工作流的必需依赖
 
 ### 质量门禁
-- 每阶段退出前执行：`uv run python scripts/sage_linter.py --all`
-- 文件写入后自动校验（如 hooks 可用）：`python scripts/sage_linter.py --check-scope`
+- 每阶段退出前执行：`uv run python skills/sage-workflow/core/scripts/sage_linter.py --all`
+- 文件写入后自动校验（如 hooks 可用）：`uv run python skills/sage-workflow/core/scripts/sage_linter.py --check-scope`
 
 ### 模型选择
 - Orchestrator/Planner: 强推理模型（Opus/Pro-high），UI 选择
-- Reviewer/Coder/Closer: 按 `docs/guides/execution-channels.md` 配置的 CLI 或备选 subagent
+- Reviewer/Coder/Closer: 按 `skills/sage-workflow/core/guides/execution-channels.md` 配置的 CLI 或备选 subagent
 - Doc-gardener/Schedule: 低成本文档模型或工具默认模型
 - L1 任务: Flash 全流程 | L3 任务: Opus 全流程
-- 详细指南 → [docs/guides/model-selection.md](docs/guides/model-selection.md)
+- 详细指南 → [core/guides/model-selection.md](skills/sage-workflow/core/guides/model-selection.md)
 
 ## 不可违反的约束
 1. 部署阶段必须人类授权（ask_permission），智能体严禁私自触发

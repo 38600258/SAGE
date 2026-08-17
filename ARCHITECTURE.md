@@ -1,7 +1,7 @@
 # 架构总览
 
 > 本文件提供 SAGE 1.0 的顶层架构地图。
-> 详细规范参见 [development-standards.md](docs/guides/development-standards.md) 与 [execution-channels.md](docs/guides/execution-channels.md)。
+> 详细规范参见 [development-standards.md](skills/sage-workflow/core/guides/development-standards.md) 与 [execution-channels.md](skills/sage-workflow/core/guides/execution-channels.md)。
 
 ## 1. 系统定位
 
@@ -15,12 +15,12 @@ SAGE 是工具无关的智能体优先开发工作流。1.0 版本将流程、�
                        │ bootstrap / fallback
 ┌──────────────────────▼───────────────────────┐
 │              Project-local SAGE              │
-│  AGENTS + prompts + templates + docs/guides  │
+│  AGENTS + docs/project + skill core defaults  │
 └──────────────────────┬───────────────────────┘
                        │ task execution
 ┌──────────────────────▼───────────────────────┐
 │              Execution Channels              │
-│  Main Agent / subagent / CLI / tool adapter  │
+│  Dispatcher → Main Agent / subagent / CLI      │
 └──────────────────────────────────────────────┘
 ```
 
@@ -29,9 +29,10 @@ SAGE 是工具无关的智能体优先开发工作流。1.0 版本将流程、�
 | 场景 | 权威来源 | 说明 |
 |------|----------|------|
 | 新项目无 SAGE 文件 | `skills/sage-workflow/core/` | 使用默认发行版启动，并建议 bootstrap 到项目 |
-| 项目已有 SAGE 文件 | 项目本地 `AGENTS.md`、`prompts/`、`templates/`、`docs/guides/` | 项目覆盖优先，skill 只作适配和迁移参考 |
+| 项目已有 SAGE 文件 | 项目本地 `AGENTS.md`、`docs/project/` 与必要覆盖文件 | 项目覆盖优先；默认角色、模板、指南和门禁从 skill core 读取 |
 | 外包执行阶段 | TASK 文档 + 当前权威角色契约 | CLI/subagent 只承载角色，不拥有调度事实 |
-| 工具差异 | `skills/sage-workflow/adapters/` 或项目 `docs/guides/execution-channels.md` | 只处理执行载体差异，不改写角色契约 |
+| 工具差异 | `skills/sage-workflow/adapters/` 或 `skills/sage-workflow/core/guides/execution-channels.md` | 只处理执行载体差异，不改写角色契约 |
+| 阶段派发 | `dispatch_phase.py` 回执 + 宿主原生 API/CLI | 统一生成最小上下文、模型路由和回执验证，不伪造宿主能力 |
 
 ## 3. 目录结构与职责
 
@@ -40,11 +41,12 @@ SAGE 是工具无关的智能体优先开发工作流。1.0 版本将流程、�
 | `AGENTS.md` | 入口 | 工具无关 SAGE 入口规则 |
 | `AGENTS.override.md` | 入口 | Codex app 自包含覆盖入口 |
 | `GEMINI.md` | 入口 | Antigravity/Gemini 类工具覆盖规则 |
-| `prompts/` | 角色契约 | orchestrator、planner、reviewer、coder、closer、doc-gardener |
-| `templates/` | 模板 | TASK、ADR、PRD 物理复制模板 |
-| `docs/guides/` | 规范 | 开发规范、执行通道、模型选择、核心信念 |
+| `skills/sage-workflow/core/prompts/` | 角色契约默认发行版 | orchestrator、planner、reviewer、coder、closer、doc-gardener |
+| `skills/sage-workflow/core/templates/` | 模板默认发行版 | TASK、ADR、PRD 物理复制模板 |
+| `skills/sage-workflow/core/guides/` | 规范默认发行版 | 开发、任务、CHANGELOG、Git、执行通道、模型选择和核心信念 |
 | `docs/project/` | 项目状态 | 看板、模式库、决策日志、交接指南、归档任务 |
-| `scripts/` | 工具 | `sage_linter.py` 等质量门禁 |
+| `skills/sage-workflow/core/scripts/` | 工具默认发行版 | `sage_linter.py`、`bootstrap_sage.py`、`dispatch_phase.py` |
+| `skills/sage-workflow/core/githooks/` | 提交门禁默认发行版 | commit-msg 硬门禁及启用说明 |
 | `skills/sage-workflow/` | Skill 发行版 | SAGE 1.0 默认规范包与跨工具适配层 |
 
 ## 4. Skill 内部结构
@@ -58,7 +60,10 @@ SAGE 是工具无关的智能体优先开发工作流。1.0 版本将流程、�
 | `skills/sage-workflow/core/templates/` | 默认 TASK/ADR/PRD 模板 |
 | `skills/sage-workflow/core/guides/` | 默认操作指南 |
 | `skills/sage-workflow/core/methodology/` | 默认方法论文档 |
-| `skills/sage-workflow/adapters/` | Codex、CLI、通用工具适配说明 |
+| `skills/sage-workflow/core/scaffold/` | standalone 项目初始骨架 |
+| `skills/sage-workflow/core/scripts/` | 默认 linter、bootstrap 与阶段派发脚本 |
+| `skills/sage-workflow/core/githooks/` | 默认提交 hooks |
+| `skills/sage-workflow/adapters/` | Codex、CLI、通用工具适配说明与 JSON 能力声明 |
 | `skills/sage-workflow/references/` | 路径解析和迁移参考 |
 
 ## 5. 阶段数据流
@@ -74,8 +79,16 @@ Main Agent 加载入口 + orchestrator/planner
   │
   ▼
 PlanReview / Dev / CodeReview / Close
-  │       │
-  │       └─ subagent/CLI 只接收 REPO_ROOT、TASK_PATH、ROLE_PROMPT、PHASE
+  │
+  ▼
+Dispatcher prepare 生成最小上下文与派发前回执
+  │
+  ├─ action=spawn_subagent → Main Agent 调用宿主原生 API，并按 binding 传递/校验模型
+  └─ action=run_cli → Dispatcher 执行无 shell 命令数组，校验 `{model}` 消费
+  │
+  ▼
+verify 检查 TASK 阶段章节 + Git 指纹/HEAD
+  │
   ▼
 TASK 证据链 + CHANGELOG + 项目看板 + Git 提交
 ```
@@ -84,4 +97,4 @@ TASK 证据链 + CHANGELOG + 项目看板 + Git 提交
 
 - 增加 `sage doctor`：检查 skill 默认发行版与项目本地覆盖的同步状态。
 - 增加 diff/migration 工具：辅助项目从旧版 SAGE 升级到新版 skill core。
-- 为更多工具补充 adapter：Claude Code、Cursor、Windsurf 等可在 `adapters/` 中扩展。
+- 为更多工具补充 adapter：Claude Code、Cursor、Windsurf 等可在 `adapters/` 中扩展，并声明各阶段模型绑定方式。

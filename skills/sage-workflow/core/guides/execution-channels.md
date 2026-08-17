@@ -13,7 +13,7 @@
 - **角色契约**：`prompts/reviewer.md`、`prompts/coder.md`、`prompts/closer.md`
 - **调度事实来源**：TASK 文档元数据（风险等级、当前阶段、项目根目录、功能分支）
 - **执行通道**：subagent / CLI / Main Agent，只负责承载当前权威角色规则；不得把项目化角色规则再复制到载体提示层
-- **能力优先**：工具原生支持 subagent 且已验证可用时，优先使用角色 subagent；不可用时按失败恢复协议切换 CLI fallback
+- **能力优先**：工具原生支持 subagent 且已验证可用时，优先使用角色 subagent；不可用时按降级链切换注入式 subagent 或 CLI fallback
 - **修改通道**：优先只改本文档的“默认通道矩阵”和“派发模板”
 - **L0 快速通道**：L0 不创建 TASK 文档，不调用 CLI/subagent，由 Main Agent 直接执行
 
@@ -24,12 +24,32 @@
 | 角色 | L0 | L1 | L2 | L3 | 默认通道 | 备选通道 |
 |------|----|----|----|----|----------|----------|
 | `planner` | Main Agent | Main Agent | Main Agent | Main Agent | 主线程 | research subagent 仅做调研/草拟 |
-| `reviewer` | 不触发 | 默认跳过 | 必须触发 | 必须触发 | reviewer subagent | reviewer CLI |
-| `coder` | Main Agent | coder subagent | coder subagent | coder subagent | coder subagent | coder CLI / 人工确认后的 Main Agent fallback |
-| `closer` | Main Agent | closer subagent | closer subagent | closer subagent | closer subagent | closer CLI / 人工确认后的 Main Agent fallback |
+| `reviewer` | 不触发 | 默认跳过 | 必须触发 | 必须触发 | reviewer subagent | 注入式 reviewer → reviewer CLI |
+| `coder` | Main Agent | coder subagent | coder subagent | coder subagent | coder subagent | 注入式 coder → coder CLI → 人工确认后的 Main Agent fallback |
+| `closer` | Main Agent | closer subagent | closer subagent | closer subagent | closer subagent | 注入式 closer → closer CLI → 人工确认后的 Main Agent fallback |
 
 > 项目可按工具能力覆盖默认通道，但不得绕过 TASK、角色提示词和质量门禁。
-> 若默认 subagent 未注册、无法启动、工具调用失败或无法产生 TASK/Git 有效产出，必须先复核 Git/TASK/进程/已有产出状态，记录失败现象和修复尝试，再切换 CLI fallback。
+> 若默认 subagent 未注册、无法启动、工具调用失败或无法产生 TASK/Git 有效产出，必须先复核 Git/TASK/进程/已有产出状态，记录失败现象和修复尝试，再按下一节降级链切换备选通道。
+
+---
+
+## 二·补 通道降级链与熔断条款
+
+通道按优先级降级，每次降级必须在 TASK 证据链记录原因、时间戳和授权人：
+
+| 级别 | 通道 | 适用条件 |
+|------|------|----------|
+| 1 | 原生注册子代理（`spawn_subagent`） | 宿主支持命名 agent 注册且实际派发成功 |
+| 2 | 注入式子代理（`--channel injected`） | 宿主有通用子代理/后台任务能力但无命名注册；派发时注入 ROLE_PROMPT |
+| 3 | CLI 进程（`run-cli`） | 宿主无子代理能力；命令数组必须消费 `{model}` |
+| 4 | 人工授权降级审查 | 仅 reviewer；1~3 级全部失败且累计 ≥3 次后，由人类授权 Main Agent 在隔离会话中审查 |
+
+降级链规则：
+
+1. **注入式通道要求授权**：`prepare` 信封 `injection.requires_authorization=true` 时，Main Agent 派发前必须获得人工确认，并把隔离等级（`injection.isolation`）写回 TASK 证据链，不得静默使用。
+2. **跨宿主审查是合法独立通道**：盲审隔离单位是"模型 + 上下文"，不是"同一宿主进程"。审查方与执行方为不同宿主或不同模型家族时，天然满足隔离要求，按注入式通道记录即可，不属于自审。
+3. **熔断条款**：独立审查通道（级别 1~3）对同一阶段累计失败 ≥3 次后，停止自动重试。合法出口只有三个：人类接管审查；人工授权级别 4 降级审查（TASK 中标注隔离等级与授权）；任务挂起并登记技术债。禁止伪造 OK/WARN/BLOCK。
+4. **探测前移**：L1 及以上任务进入 Init 前，应运行 `doctor` 探测通道可用性，避免任务推进到盲审门禁才发现通道不可用。
 
 ---
 
@@ -51,11 +71,51 @@ subagent/CLI 不应依赖当前工作目录、聊天上下文或隐式相对路�
 
 ---
 
-## 四、派发模板
+## 四、自动派发运行时
 
+L1 及以上进入外部执行阶段前，优先运行项目本地 `scripts/sage_dispatch.py`；尚未 bootstrap 时运行 Skill 内置 `core/scripts/dispatch_phase.py`。
+
+### 4.1 能力探测与通道体检
+
+```powershell
+uv run python scripts/sage_dispatch.py capabilities --adapter codex
+uv run python scripts/sage_dispatch.py doctor --adapter codex --repo-root <repo>
+```
+
+`doctor` 逐通道输出 declared/available/verification 和推荐通道：原生通道按 adapter 声明判定（运行时可用性以实际派发为准）；注入式通道校验 agent_types 完整性；CLI 通道只探测可执行文件可否定位，不执行命令。无可用通道时退出码为 1。
+
+adapter 的机器配置按以下顺序解析：项目本地 `docs/guides/execution-adapters/<adapter>.json`、Skill 内置 `adapters/<adapter>.json`、显式 `--adapter-file`。项目可替换 Agent 名称、模型路由和 CLI 命令，但不得复制角色契约。
+
+`models.<phase>` 是阶段级模型配置：`id` 是默认模型，`subagent_binding=request` 允许 `--model` 请求级覆盖，`agent-registration` 表示模型固定在宿主 Agent 注册，`cli_binding=command-argument` 要求 CLI 命令实际使用 `{model}`。运行 `capabilities` 可查看各阶段模型映射。
+
+### 4.2 准备与原生派发
+
+```powershell
+uv run python scripts/sage_dispatch.py prepare --repo-root <repo> --task-path <task> --phase <phase> --adapter <adapter> --model <model-id> --format json
+```
+
+- `action=spawn_subagent`：Main Agent 必须立即使用宿主原生 API 创建 `agent_type` 指定的 subagent，并且只传信封中的 `prompt` 与协议允许的模型字段。`request` 绑定按 `model.requested` 传参，`agent-registration` 绑定只能校验宿主注册模型，不能假装单次覆盖。Dispatcher 负责协议和回执，不具备宿主 API 时不会伪造调用成功。
+- `action=run_cli`：运行 `run-cli --receipt <receipt>`；命令必须来自 JSON 字符串数组，不允许 shell 拼接。若回执有具体模型，命令必须包含 `{model}`，否则 Dispatcher 阻断。
+- 原生 subagent Adapter 切换 CLI 必须同时传入 `--fallback-reason` 与 `--fallback-authorized`，防止静默降级。
+
+### 4.3 状态、验证与取消
+
+```powershell
+uv run python scripts/sage_dispatch.py status --receipt <receipt>
+uv run python scripts/sage_dispatch.py verify --receipt <receipt> --format json
+uv run python scripts/sage_dispatch.py cancel --receipt <receipt> --reason <原因>
+```
+
+`verify` 比较派发前后 TASK 阶段章节、Git 内容指纹和 HEAD；reviewer 还必须写入 OK/WARN/BLOCK。`cancel` 对原生 subagent 只生成 `host_cancel_required`，Main Agent 仍须调用宿主取消 API。
+
+回执默认保存在系统临时目录，只用于运行时协调；长期证据必须写回 TASK。完整协议见 Skill 内 `references/dispatch-protocol.md` 或 adapter 文档。
+
+---
+
+## 五、派发模板
 以下模板是默认建议，可按项目工具栈替换。若工具支持命名 subagent，建议为三个阶段分别配置 reviewer/coder/closer subagent；若不支持，使用 CLI fallback。
 
-### 4.1 Reviewer Subagent
+### 5.1 Reviewer Subagent
 
 ```text
 agent_type = "sage_reviewer"  # 项目可替换为本工具实际 reviewer subagent 名称
@@ -69,7 +129,7 @@ DIFF_CMD=<代码审查阶段填写；计划审查可省略>
 请先定位到 REPO_ROOT，读取 ROLE_PROMPT 和 TASK_PATH，从 TASK 元数据获取调度信息。按 reviewer 角色契约执行盲审，将报告写回 TASK 对应章节，必须包含 OK/WARN/BLOCK。
 ```
 
-### 4.2 Coder Subagent
+### 5.2 Coder Subagent
 
 ```text
 agent_type = "sage_coder"  # 项目可替换为本工具实际 coder subagent 名称
@@ -82,7 +142,7 @@ PHASE=dev
 请先定位到 REPO_ROOT，读取 ROLE_PROMPT 和 TASK_PATH，从 TASK 元数据获取调度信息。只执行 TASK 1.1~1.5 冻结范围，将进度和证据写回 TASK 3.x。你不是独自在代码库中工作，不得还原或覆盖他人修改。
 ```
 
-### 4.3 Closer Subagent
+### 5.3 Closer Subagent
 
 ```text
 agent_type = "sage_closer"  # 项目可替换为本工具实际 closer subagent 名称
@@ -95,13 +155,31 @@ PHASE=close
 请先定位到 REPO_ROOT，读取 ROLE_PROMPT 和 TASK_PATH，从 TASK 元数据获取调度信息。只做收尾归档、质量门禁和中文提交；严禁新增功能，严禁 merge/push/deploy。你不是独自在代码库中工作，不得还原或覆盖他人修改。
 ```
 
-### 4.4 CLI Fallback
+### 5.4 注入式子代理（无命名注册的宿主）
 
-CLI fallback 只在默认 subagent 不可用、已复核现场、已尝试修复且记录失败处理后使用。CLI prompt 仍必须遵守第 3 节上下文传递契约，并要求回写 TASK 对应章节。
+宿主提供通用子代理/后台任务但没有命名注册时，使用 `prepare --adapter generic-tool --channel injected`。Main Agent 用宿主原生派发工具创建通用子代理，把信封 `prompt` 作为任务指令；宿主在派发上下文中注入 ROLE_PROMPT。每次派发前需人工授权；隔离等级以信封 `injection.isolation` 为准并写回 TASK 证据链。
+
+### 5.5 CLI Fallback
+
+CLI fallback 只在更高优先级通道不可用、已复核现场、已尝试修复且记录失败处理后使用。CLI prompt 仍必须遵守第 3 节上下文传递契约，并要求回写 TASK 对应章节。
+
+### 5.6 通道 provisioning
+
+宿主 agent 注册缺失或漂移时，用 `provision` 生成注册文件：
+
+```powershell
+# Codex 全局 TOML 注册（生成后人工放置到 ~/.codex/agents，Skill 不代写工作区外配置）
+uv run python scripts/sage_dispatch.py provision --method toml-directory --target-dir <agents 目录>
+
+# Claude Code 等项目内 agents 目录（随仓库版本化）
+uv run python scripts/sage_dispatch.py provision --method markdown-agents-directory --target-dir <repo>\.claude\agents
+```
+
+生成后必须重启/刷新宿主，并用最小派发探针验证注册生效；注册是否可用以宿主实际派发结果为准，provision 本身不证明可用。
 
 ---
 
-## 五、替换执行载体的规则
+## 六、替换执行载体的规则
 
 如需替换为其他 subagent 或 CLI，只改派发模板中的载体名称和参数格式，保留以下不变量：
 
@@ -114,20 +192,20 @@ CLI fallback 只在默认 subagent 不可用、已复核现场、已尝试修复
 
 ---
 
-## 六、模型目录与载体提示边界
+## 七、模型目录与载体提示边界
 
 `base_instructions`、`model_messages`、subagent 配置中的 `developer_instructions` 属于执行载体层，不属于角色契约层。
 
 - 允许写入模型身份、工具环境、通用行为和安全边界。
 - 禁止写入 reviewer/coder/closer 的项目化完整职责规则，避免与当前权威 `prompts/*.md` 或 skill 默认发行版漂移。
 - 禁止写入仓库路径、任务编号、阶段、输出章节等任务事实。
-- 如果工具链不能确认模板变量会被渲染，不要依赖 `{model_name}` 等占位符；应直接生成已渲染文本。
-- 模型身份与路由以 provider/shim 请求日志为准；模型自报仅作调试参考。
+- 角色 prompt 不使用模型占位符；只有 Dispatcher 执行的 CLI 命令数组使用 `{model}`，并由 `run-cli` 校验实际消费。
+- 模型身份与路由以 provider/shim 请求日志为准；模型自报仅作调试参考。修改 `agent-registration` 模型时必须同步宿主 Agent 注册文件，Skill 不自动写出工作区。
 - 修改 model catalog 或 subagent 配置后，必须重启/刷新工具，并用最小 subagent 探针验证注册、模型和工具调用。
 
 ---
 
-## 七、成功标准
+## 八、成功标准
 
 | 阶段 | 成功标准 |
 |------|----------|

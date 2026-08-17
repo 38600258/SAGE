@@ -1036,6 +1036,16 @@ def check_execution_channel_records(task_file):
 # 活跃任务定位辅助
 # ==============================================================================
 
+def resolve_workflow_path(sage_root, local_relative, core_relative=None):
+    """优先使用项目本地文件；缺失时回退到 skill 默认发行版。"""
+    local_path = sage_root / local_relative
+    if local_path.exists():
+        return local_path
+    skill_path = sage_root / "skills" / "sage-workflow" / "core" / (core_relative or local_relative)
+    if skill_path.exists():
+        return skill_path
+    return local_path
+
 def find_active_task(sage_root):
     """在项目中寻找当前活跃任务文档，返回 Path 或 None"""
     # 活跃任务只允许放在 docs/project/；完成后归档到 docs/project/tasks/T-XXX.md
@@ -1127,9 +1137,9 @@ def main():
         sys.exit(2)
 
     # 获取常用的路径引用
-    template_file = sage_root / "templates" / "TASK-TEMPLATE.md"
+    template_file = resolve_workflow_path(sage_root, Path("templates") / "TASK-TEMPLATE.md")
     docs_dir = sage_root / "docs"
-    templates_dir = sage_root / "templates"
+    templates_dir = resolve_workflow_path(sage_root, Path("templates"))
     changelog_file = sage_root / "CHANGELOG.md"
     decision_log_file = sage_root / "docs" / "project" / "DECISION_LOG.md"
 

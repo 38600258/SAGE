@@ -1,0 +1,46 @@
+#!/bin/sh
+set -eu
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+MSG_FILE="$1"
+export PYTHONIOENCODING=utf-8
+
+LINTER=""
+for candidate in \
+  "scripts/sage_linter.py" \
+  "skills/sage-workflow/core/scripts/sage_linter.py"
+do
+  if [ -f "$candidate" ]; then
+    LINTER="$candidate"
+    break
+  fi
+done
+
+if [ -z "$LINTER" ]; then
+  echo "SAGE commit-msg: sage_linter.py not found" >&2
+  exit 2
+fi
+
+PYTHON_BIN=""
+for candidate in \
+  ".venv/Scripts/python.exe" \
+  ".venv/bin/python" \
+  "python3" \
+  "python" \
+  "python.cmd" \
+  "py"
+do
+  if "$candidate" "$LINTER" --help >/dev/null 2>&1; then
+    PYTHON_BIN="$candidate"
+    break
+  fi
+done
+
+if [ -z "$PYTHON_BIN" ]; then
+  echo "SAGE commit-msg: Python not found; cannot run sage_linter.py" >&2
+  exit 2
+fi
+
+"$PYTHON_BIN" "$LINTER" --check-commit-msg "$MSG_FILE"

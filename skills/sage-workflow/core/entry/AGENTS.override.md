@@ -7,25 +7,35 @@
 
 ## 快速导航
 **方法论与架构**
-- 开发方法论 → [智能体优先的自主编程方法论.md](智能体优先的自主编程方法论.md)
-- 项目管理方法论 → [智能体优先的自主项目管理方法论.md](智能体优先的自主项目管理方法论.md)
-- 架构总览 → [ARCHITECTURE.md](ARCHITECTURE.md)
-- 变更日志 → [CHANGELOG.md](CHANGELOG.md)
+- 开发方法论 → [智能体优先的自主编程方法论.md](../methodology/智能体优先的自主编程方法论.md)
+- 项目管理方法论 → [智能体优先的自主项目管理方法论.md](../methodology/智能体优先的自主项目管理方法论.md)
+- 架构总览 → [ARCHITECTURE.md](../scaffold/ARCHITECTURE.md)
+- 变更日志 → [CHANGELOG.md](../scaffold/CHANGELOG.md)
 
 **规范与状态**
-- 开发规范 → [docs/guides/development-standards.md](docs/guides/development-standards.md)
-- 任务文档规范 → [docs/guides/task-document-standards.md](docs/guides/task-document-standards.md)
-- 设计原则 → [docs/guides/core-beliefs.md](docs/guides/core-beliefs.md)
-- 模型选择 → [docs/guides/model-selection.md](docs/guides/model-selection.md)
-- 执行通道 → [docs/guides/execution-channels.md](docs/guides/execution-channels.md)
-- 项目看板 → [docs/project/PROJECT_BOARD.md](docs/project/PROJECT_BOARD.md)
-- 模式库 / 决策 / 交接 → [KNOWN_PATTERNS](docs/project/KNOWN_PATTERNS.md) / [DECISION_LOG](docs/project/DECISION_LOG.md) / [HANDOVER](docs/project/HANDOVER-GUIDE.md)
+- 开发规范 → [docs/guides/development-standards.md](../guides/development-standards.md)
+- 任务文档规范 → [docs/guides/task-document-standards.md](../guides/task-document-standards.md)
+- 变更日志规范 → [docs/guides/changelog-standards.md](../guides/changelog-standards.md)
+- Git 规范 → [docs/guides/git-standards.md](../guides/git-standards.md)
+- 设计原则 → [docs/guides/core-beliefs.md](../guides/core-beliefs.md)
+- 模型选择 → [docs/guides/model-selection.md](../guides/model-selection.md)
+- 执行通道 → [docs/guides/execution-channels.md](../guides/execution-channels.md)
+- 项目看板 → [docs/project/PROJECT_BOARD.md](../scaffold/docs/project/PROJECT_BOARD.md)
+- 模式库 / 决策 / 交接 → [KNOWN_PATTERNS](../scaffold/docs/project/KNOWN_PATTERNS.md) / [DECISION_LOG](../scaffold/docs/project/DECISION_LOG.md) / [HANDOVER](../scaffold/docs/project/HANDOVER-GUIDE.md)
 
 **模板与质量**
-- 任务模板 → [templates/TASK-TEMPLATE.md](templates/TASK-TEMPLATE.md)（L1 及以上必须物理复制）
-- ADR / PRD 模板 → [ADR](templates/ADR-template.md) / [PRD](templates/PRD-template.md)
-- 角色提示词 → [prompts/](prompts/)
+- 任务模板 → [templates/TASK-TEMPLATE.md](../templates/TASK-TEMPLATE.md)（L1 及以上必须物理复制）
+- ADR / PRD 模板 → [ADR](../templates/ADR-template.md) / [PRD](../templates/PRD-template.md)
+- 角色提示词 → [prompts/](../prompts/)
 - 质量门禁 → `uv run python scripts/sage_linter.py --all`
+
+## 阶段必读规范
+
+| 阶段 | 必读规范 |
+|------|----------|
+| 初始化 | [task-document-standards.md](../guides/task-document-standards.md) |
+| 编码实现 | [task-document-standards.md](../guides/task-document-standards.md) |
+| 收尾归档 | [changelog-standards.md](../guides/changelog-standards.md)、[git-standards.md](../guides/git-standards.md)、[task-document-standards.md](../guides/task-document-standards.md) |
 
 ## 任务入口规则
 
@@ -54,14 +64,14 @@
 
 5. **子代理派发门禁**：L1 及以上，TASK 文档 1.1~1.5 冻结后，方可派发 coder/closer 等执行型子代理；派发时只传递必要定位信息（TASK 文档路径、角色提示词路径、阶段、仓库根目录），任务等级等调度信息以 TASK 元数据为准。L0 免除 TASK 文档，主代理直接执行，不派发 CLI/subagent。
 
-6. **执行通道协议**：L1 及以上，CLI/subagent 通过 TASK 文档元数据（风险等级、当前阶段、项目根目录、功能分支）获取调度信息；不得传递主线程讨论历史或额外隐式上下文；具体 CLI 命令从 [execution-channels](docs/guides/execution-channels.md) 读取，缺省按 L2。
+6. **执行通道协议**：L1 及以上，CLI/subagent 通过 TASK 文档元数据（风险等级、当前阶段、项目根目录、功能分支）获取调度信息；不得传递主线程讨论历史或额外隐式上下文；具体 CLI 命令从 [execution-channels](../guides/execution-channels.md) 读取，缺省按 L2；L1 及以上派发前先运行 `../scripts/dispatch_phase.py prepare`，宿主原生能力由 Main Agent 调用，模型按 adapter 信封的 `request` / `agent-registration` 绑定传递或校验，完成后必须运行 `verify`。
 
 7. **编排校准**：阶段流转、外包边界不确定时，参考 `prompts/orchestrator.md` 编排细节。
 
 ## Codex 覆盖规则
 1. 不另建 `CODEX.md`；本文件就是 Codex app 专用入口。
 2. 分支从项目开发基线分支切出：L1+ 使用 `feat|fix|docs|chore|refactor/t-XXX-*`；L0 可用 `fix|docs|chore|style/l0-*`；禁止工具名前缀。
-3. reviewer/coder/closer 可交给原生 subagent 或 CLI；Codex app 默认优先按 `docs/guides/execution-channels.md` 的 subagent 派发模板调用，CLI 作为受控 fallback，项目可只改该文档替换执行载体。
+3. reviewer/coder/closer 可交给原生 subagent 或 CLI；Codex app 默认先运行 `../scripts/dispatch_phase.py prepare`，再按执行通道调用原生 subagent，CLI 作为受控 fallback，完成后运行 `verify`。
 4. subagent/CLI Prompt 只提供 `REPO_ROOT`、`TASK_PATH`、`ROLE_PROMPT`、`PHASE` 等必要定位信息，并要求回写 TASK 对应章节；其他调度信息从 TASK 元数据读取。
 5. subagent/CLI 成功标准是 TASK/Git 状态出现有效产出；stdout、退出码或 subagent 回复不能单独作为依据。默认 subagent 不可用时，必须先复核现场并尝试修复；仍不可用时记录失败并切换 CLI fallback；CLI 也不可用时停止报告，由人类确认后才可改用 Main Agent fallback。
 6. `base_instructions`、`model_messages` 和 subagent 配置只属于载体提示层，不得复制项目化角色契约或任务事实；SAGE skill 内置默认发行版除外，但项目本地覆盖始终优先。模型身份与路由以 provider/shim 请求日志为准。

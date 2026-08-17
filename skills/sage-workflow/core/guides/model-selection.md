@@ -59,6 +59,10 @@ reviewer / coder / closer 的具体 subagent 派发模板和 CLI fallback 模板
 - 不要在 model catalog 中写仓库路径、任务编号、阶段或输出章节。
 - 若工具链不能确认模板变量会被渲染，生成 catalog 时应写入已渲染的 `instructions_template`。
 - 模型身份与真实路由以 provider/shim 请求日志为准，模型自报仅作参考。
+- reviewer/coder/closer 的阶段默认模型写在 adapter `models.<phase>.id`，不写在角色 prompt。
+- 原生 API 支持请求级模型时使用 `subagent_binding=request`；模型固定在命名 Agent 注册时使用 `agent-registration`，并同步宿主注册配置。
+- CLI 使用 `cli_binding=command-argument`，通过 Dispatcher 的 `{model}` 命令占位符传递；`prepare --model <id>` 可覆盖允许覆盖的阶段默认值。
+
 ### 4.2 审查报告回写
 
 Reviewer 执行载体应直接写回 TASK 文档：计划盲审写入 2.1 节，代码盲审写入 4.1 节。若工具只返回报告文本，则由 Main Agent 捕获后写入对应章节。
