@@ -14,22 +14,22 @@
   },
   "models": {
     "plan-review": {
-      "id": "claude-opus-4-7",
+      "id": "gpt-5.6-sol",
       "subagent_binding": "agent-registration",
       "cli_binding": "command-argument"
     },
     "dev": {
-      "id": "deepseek-v4-pro",
+      "id": "gpt-5.6-terra",
       "subagent_binding": "agent-registration",
       "cli_binding": "command-argument"
     },
     "code-review": {
-      "id": "claude-opus-4-7",
+      "id": "gpt-5.6-sol",
       "subagent_binding": "agent-registration",
       "cli_binding": "command-argument"
     },
     "close": {
-      "id": "deepseek-v4-flash",
+      "id": "gpt-5.6-luna",
       "subagent_binding": "agent-registration",
       "cli_binding": "command-argument"
     }
