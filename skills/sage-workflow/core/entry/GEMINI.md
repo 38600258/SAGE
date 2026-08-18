@@ -12,7 +12,7 @@
 - 会话中断时 TASK 文档必须完好保存在仓库中
 
 ### 盲审规范
-- L1 及以上 reviewer/coder/closer 派发前运行 `uv run python skills/sage-workflow/core/scripts/dispatch_phase.py prepare`，adapter 使用项目实际工具配置。
+- L1 及以上 reviewer/coder/closer 派发前运行 `uv run python ../scripts/dispatch_phase.py prepare`，adapter 使用项目实际工具配置。
 - `action=spawn_subagent` 时由 main agent 调用宿主原生 API；`action=run_cli` 时使用回执执行 `run-cli`。
 - L0 不调用 CLI/subagent，由 main agent 直接执行。
 - 派发 prompt 只包含 `REPO_ROOT`、`TASK_PATH`、`ROLE_PROMPT`、`PHASE` 和可选 `DIFF_CMD`；其他调度信息从 TASK 元数据读取。
@@ -33,15 +33,15 @@
 - Artifact 仅用于人类阅读，不是工作流的必需依赖
 
 ### 质量门禁
-- 每阶段退出前执行：`uv run python skills/sage-workflow/core/scripts/sage_linter.py --all`
-- 文件写入后自动校验（如 hooks 可用）：`uv run python skills/sage-workflow/core/scripts/sage_linter.py --check-scope`
+- 每阶段退出前执行：`uv run python scripts/sage_linter.py --all`
+- 文件写入后自动校验（如 hooks 可用）：`python scripts/sage_linter.py --check-scope`
 
 ### 模型选择
 - Orchestrator/Planner: 强推理模型（Opus/Pro-high），UI 选择
-- Reviewer/Coder/Closer: 按 `skills/sage-workflow/core/guides/execution-channels.md` 配置的 CLI 或备选 subagent
+- Reviewer/Coder/Closer: 按 `docs/guides/execution-channels.md` 配置的 CLI 或备选 subagent
 - Doc-gardener/Schedule: 低成本文档模型或工具默认模型
 - L1 任务: Flash 全流程 | L3 任务: Opus 全流程
-- 详细指南 → [core/guides/model-selection.md](skills/sage-workflow/core/guides/model-selection.md)
+- 详细指南 → [docs/guides/model-selection.md](../guides/model-selection.md)
 
 ## 不可违反的约束
 1. 部署阶段必须人类授权（ask_permission），智能体严禁私自触发

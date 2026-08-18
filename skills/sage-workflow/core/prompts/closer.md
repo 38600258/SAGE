@@ -22,6 +22,8 @@
 4. 若 `当前阶段` 不是 `close`，暂停并报告：`"阶段不匹配: 当前阶段={当前阶段}, 期望=close"`
 5. L1 及以上确认 TASK 文档 1.1~1.5 已完成且视为冻结输入；不得回写或重写阶段 1 内容
 6. 根据任务等级决定收尾强度：L1 做最小归档；L2 完成审查与证据链归档；L3 收尾后停止等待人工确认
+7. L1 及以上收尾阶段必须加载 `docs/guides/changelog-standards.md`、`docs/guides/git-standards.md`、`docs/guides/task-document-standards.md`
+8. L1 及以上逐条核对 `1.3a` 的 `AC-ID` 是否已在 `3.2` 写入自动化证据或明确人工验证记录；缺失时暂停并报告，不得归档
 
 ### 0.1 等级行为矩阵
 
@@ -56,7 +58,7 @@
 
 ### 4. 文档同步
 
-- 更新 `CHANGELOG.md`（如有用户可见变化或仓库规范要求）
+- 按 `docs/guides/changelog-standards.md` 更新 `CHANGELOG.md`（如有用户可见变化或仓库规范要求）
 - 版本号管理：仅在仓库采用版本发布且本任务触发版本变化时执行；参考 feat→minor / fix→patch / 架构升级→major
 - 更新 `CAPABILITY_SNAPSHOT.md`（如本次新增能力）
 - 更新其他受影响的文档（README、配置文档等）
@@ -80,7 +82,9 @@ git commit -m "<类型>(<范围>): <描述>"
 
 ### 7. 质量门禁
 
-退出前执行：`python scripts/sage_linter.py --all`
+退出前执行：`uv run python scripts/sage_linter.py --all`
+
+质量门禁通过后，再确认 `1.3a` 验收标准与 `3.2` 证据链一一闭环；TASK 仍有未闭环 `AC-ID` 时不得提交或归档。
 
 ---
 

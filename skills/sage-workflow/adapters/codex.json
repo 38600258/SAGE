@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "codex",
+  "display_name": "Codex",
+  "native_subagent": {
+    "supported": true,
+    "invoker": "host",
+    "agent_types": {
+      "plan-review": "sage_reviewer",
+      "dev": "sage_coder",
+      "code-review": "sage_reviewer",
+      "close": "sage_closer"
+    }
+  },
+  "models": {
+    "plan-review": {
+      "id": "gpt-5.6-sol",
+      "subagent_binding": "agent-registration",
+      "cli_binding": "command-argument"
+    },
+    "dev": {
+      "id": "gpt-5.6-terra",
+      "subagent_binding": "agent-registration",
+      "cli_binding": "command-argument"
+    },
+    "code-review": {
+      "id": "gpt-5.6-sol",
+      "subagent_binding": "agent-registration",
+      "cli_binding": "command-argument"
+    },
+    "close": {
+      "id": "gpt-5.6-luna",
+      "subagent_binding": "agent-registration",
+      "cli_binding": "command-argument"
+    }
+  },
+  "cli": {
+    "supported": true,
+    "command_env": "SAGE_CODEX_CLI_COMMAND_JSON",
+    "stdin": "prompt"
+  }
+}

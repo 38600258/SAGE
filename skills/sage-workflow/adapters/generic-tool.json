@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "id": "generic-tool",
+  "display_name": "通用 AI 编程工具",
+  "native_subagent": {
+    "supported": false,
+    "invoker": "host",
+    "agent_types": {}
+  },
+  "injected_subagent": {
+    "supported": true,
+    "invoker": "host",
+    "isolation": "context-fresh",
+    "requires_authorization": true,
+    "agent_types": {
+      "plan-review": "sage_reviewer",
+      "dev": "sage_coder",
+      "code-review": "sage_reviewer",
+      "close": "sage_closer"
+    },
+    "notes": "宿主无命名注册，派发时注入 ROLE_PROMPT；隔离等级为上下文级（模型级隔离取决于宿主当前模型与执行方差异），每次派发前需人工授权并在 TASK 证据链记录。"
+  },
+  "models": {
+    "plan-review": {
+      "id": null,
+      "subagent_binding": "request",
+      "cli_binding": "command-argument"
+    },
+    "dev": {
+      "id": null,
+      "subagent_binding": "request",
+      "cli_binding": "command-argument"
+    },
+    "code-review": {
+      "id": null,
+      "subagent_binding": "request",
+      "cli_binding": "command-argument"
+    },
+    "close": {
+      "id": null,
+      "subagent_binding": "request",
+      "cli_binding": "command-argument"
+    }
+  },
+  "cli": {
+    "supported": true,
+    "command_env": "SAGE_CLI_COMMAND_JSON",
+    "stdin": "prompt"
+  }
+}
