@@ -11,7 +11,7 @@
 
 ## 能力覆盖
 
-`generic-tool.json` 不假设宿主一定支持原生 subagent，默认选择 CLI。若工具实际提供原生 Worker/Subagent API，应在项目创建 `docs/guides/execution-adapters/<tool>.json`：
+`generic-tool.json` 不假设宿主一定支持原生 subagent，默认选择 CLI。若工具实际提供原生 Worker/Subagent API，应在项目创建 `docs/guides/execution-adapters/<tool>/<tool>.json`（与 Skill 内置 `adapters/<id>/<id>.json` 的目录结构一致）：
 
 1. 将 `native_subagent.supported` 设为 `true`。
 2. 为 `plan-review`、`dev`、`code-review`、`close` 配置实际 `agent_types`。

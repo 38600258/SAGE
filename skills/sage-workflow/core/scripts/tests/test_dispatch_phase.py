@@ -103,7 +103,7 @@ class DispatchPhaseTests(unittest.TestCase):
         self.assertEqual(
             receipt["model"],
             {
-                "requested": "deepseek-v4-pro",
+                "requested": "gpt-5.6-terra",
                 "binding": "agent-registration",
                 "source": "adapter",
             },
@@ -410,45 +410,52 @@ task.write_text(content, encoding='utf-8')
         self.assertFalse(channels["cli"]["available"])
         self.assertIsNone(payload["recommended_channel"])
 
-    def test_provision_markdown_agents(self) -> None:
+    def test_provision_claude_code_generates_markdown_agents(self) -> None:
         target = Path(self.temp_dir.name) / "claude-agents"
         completed = self.dispatch(
             "provision",
-            "--method",
-            "markdown-agents-directory",
+            "--adapter",
+            "claude-code",
             "--target-dir",
             str(target),
             "--format",
             "json",
         )
         payload = json.loads(completed.stdout)
+        self.assertEqual(payload["adapter"], "claude-code")
         self.assertEqual([item["status"] for item in payload["results"]], ["written", "written", "written"])
         reviewer = (target / "sage-reviewer.md").read_text(encoding="utf-8")
         self.assertIn("name: sage-reviewer", reviewer)
+        self.assertIn("tools: Read, Write, Edit, Grep, Glob, Bash", reviewer)
         self.assertIn("ROLE_PROMPT", reviewer)
+        coder = (target / "sage-coder.md").read_text(encoding="utf-8")
+        self.assertIn("name: sage-coder", coder)
+        self.assertIn("SAGE coder 子代理", coder)
 
-    def test_provision_toml_uses_adapter_models_and_skips_existing(self) -> None:
+    def test_provision_codex_toml_uses_adapter_models_and_skips_existing(self) -> None:
         target = Path(self.temp_dir.name) / "codex-agents"
         self.dispatch(
             "provision",
-            "--method",
-            "toml-directory",
+            "--adapter",
+            "codex",
             "--target-dir",
             str(target),
             "--format",
             "json",
         )
         reviewer = (target / "sage-reviewer.toml").read_text(encoding="utf-8")
-        self.assertIn('model = "claude-opus-4-7"', reviewer)
+        self.assertIn('model = "gpt-5.6-sol"', reviewer)
+        self.assertIn('model_provider = "codex_shim"', reviewer)
         self.assertIn('sandbox_mode = "read-only"', reviewer)
         coder = (target / "sage-coder.toml").read_text(encoding="utf-8")
-        self.assertIn('model = "deepseek-v4-pro"', coder)
+        self.assertIn('model = "gpt-5.6-terra"', coder)
         self.assertIn('sandbox_mode = "workspace-write"', coder)
 
+        # 未加 --force 时对已存在注册文件跳过（skips_existing 语义）
         completed = self.dispatch(
             "provision",
-            "--method",
-            "toml-directory",
+            "--adapter",
+            "codex",
             "--target-dir",
             str(target),
             "--format",
@@ -456,6 +463,106 @@ task.write_text(content, encoding='utf-8')
         )
         payload = json.loads(completed.stdout)
         self.assertEqual([item["status"] for item in payload["results"]], ["skipped", "skipped", "skipped"])
+
+        # --force 覆盖已存在注册文件
+        completed = self.dispatch(
+            "provision",
+            "--adapter",
+            "codex",
+            "--target-dir",
+            str(target),
+            "--force",
+            "--format",
+            "json",
+        )
+        payload = json.loads(completed.stdout)
+        self.assertEqual([item["status"] for item in payload["results"]], ["written", "written", "written"])
+
+    def test_provision_codex_passes_model_provider(self) -> None:
+        target = Path(self.temp_dir.name) / "codex-provider"
+        self.dispatch(
+            "provision",
+            "--adapter",
+            "codex",
+            "--target-dir",
+            str(target),
+            "--model-provider",
+            "custom_shim",
+            "--format",
+            "json",
+        )
+        reviewer = (target / "sage-reviewer.toml").read_text(encoding="utf-8")
+        self.assertIn('model_provider = "custom_shim"', reviewer)
+
+    def test_provision_rejects_model_provider_for_non_toml_adapter(self) -> None:
+        target = Path(self.temp_dir.name) / "claude-provider"
+        completed = self.dispatch(
+            "provision",
+            "--adapter",
+            "claude-code",
+            "--target-dir",
+            str(target),
+            "--model-provider",
+            "custom_shim",
+            expected=2,
+        )
+        self.assertIn("仅 codex", completed.stderr)
+
+    def test_provision_rejects_adapters_without_provision_script(self) -> None:
+        for adapter in ("cli", "generic-tool"):
+            with self.subTest(adapter=adapter):
+                completed = self.dispatch(
+                    "provision",
+                    "--adapter",
+                    adapter,
+                    "--target-dir",
+                    str(Path(self.temp_dir.name) / f"{adapter}-agents"),
+                    expected=2,
+                )
+                self.assertIn("不提供子代理生成", completed.stderr)
+
+    def test_provision_prefers_local_adapter_script(self) -> None:
+        local_dir = self.repo_root / "docs" / "guides" / "execution-adapters" / "codex"
+        local_dir.mkdir(parents=True)
+        # 项目本地 provision.py：写入 marker 文件以证明委托执行命中本地脚本而非 skill 内置
+        (local_dir / "provision.py").write_text(
+            "from pathlib import Path\n"
+            "import sys\n"
+            "target = Path(sys.argv[sys.argv.index('--target-dir') + 1])\n"
+            "target.mkdir(parents=True, exist_ok=True)\n"
+            "(target / 'local-provision-marker.txt').write_text('local', encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        target = Path(self.temp_dir.name) / "local-agents"
+        self.dispatch(
+            "provision",
+            "--adapter",
+            "codex",
+            "--repo-root",
+            str(self.repo_root),
+            "--target-dir",
+            str(target),
+        )
+        marker = (target / "local-provision-marker.txt").read_text(encoding="utf-8")
+        self.assertEqual(marker, "local")
+
+    def test_provision_role_filter_is_passed_through(self) -> None:
+        target = Path(self.temp_dir.name) / "role-agents"
+        completed = self.dispatch(
+            "provision",
+            "--adapter",
+            "claude-code",
+            "--target-dir",
+            str(target),
+            "--role",
+            "coder",
+            "--format",
+            "json",
+        )
+        payload = json.loads(completed.stdout)
+        self.assertEqual([item["role"] for item in payload["results"]], ["coder"])
+        self.assertTrue((target / "sage-coder.md").is_file())
+        self.assertFalse((target / "sage-reviewer.md").exists())
 
 
 if __name__ == "__main__":

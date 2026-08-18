@@ -47,7 +47,7 @@
 | 新项目无 SAGE 文件 | `skills/sage-workflow/core/` 默认发行版，建议 bootstrap |
 | 项目已有本地文件 | 本地 `AGENTS.md`、`docs/project/`、`prompts/`、`templates/`、`docs/guides/` **优先** |
 | 外包执行阶段 | TASK 文档 + 当前权威角色契约（CLI/subagent 只承载角色，不拥有调度事实） |
-| 工具差异 | `adapters/*.json` 或 `core/guides/execution-channels.md` |
+| 工具差异 | `adapters/<id>/<id>.json` 或 `core/guides/execution-channels.md` |
 | 阶段派发 | `dispatch_phase.py` 回执 + 宿主原生 API/CLI |
 
 ### 1.5 任务分级与阶段流转
@@ -189,8 +189,8 @@
 | `SUBAGENT_MODEL_BINDINGS` | {none, request, agent-registration} |
 | `CLI_MODEL_BINDINGS` | {none, command-argument} |
 | `CHANNEL_PRIORITY` | subagent=3 > injected=2 > cli=1 |
-| `PROVISIONING_METHODS` / `PROVISION_ROLES` | provision 方案与角色 |
-| `ROLE_PHASES` | 角色→阶段归属（reviewer:coding 两个审查阶段） |
+| `PROVISION_ROLES` | provision 可生成的角色（reviewer/coder/closer），生成逻辑下沉至各适配器 `adapters/<id>/provision.py` |
+| `ROLE_PHASES` | 角色→阶段归属（reviewer:coding 两个审查阶段），随 provision 下沉到各适配器脚本 |
 
 #### 异常
 
@@ -242,7 +242,7 @@
 #### 通道治理
 
 - `doctor_probe(args)`：逐通道探测可用性（原生=声明判定、注入=声明+agent_types、CLI=只探测可执行文件），输出推荐通道。
-- `provision_agents(args)`：按宿主生成 agent 注册文件（`toml-directory` 面向 Codex、`markdown-agents-directory` 面向项目 agents），利用 `build_toml_agent` / `build_markdown_agent`。
+- `provision_delegate(args)`：委托 `adapters/<id>/provision.py` 生成 agent 注册文件（codex→TOML、claude-code→Markdown），subprocess 透传 `--target-dir / --role / --force / --format`（codex 额外透传 `--model-provider`）；`locate_provision_script` 按项目本地优先定位脚本，无 provision.py 的适配器（cli/generic-tool）报错退出码 2。
 - `cancel`：仅标记 `host_cancel_required`，真正取消由宿主 API 完成。
 
 #### 子命令与格式化
@@ -295,17 +295,18 @@
 
 ### 5.3 数据依赖
 
-- **adapter JSON**（`adapters/*.json`）：声明宿主能力、阶段 agent 映射、模型路由、CLI 命令环境变量——`dispatch_phase.py` 的解析与校验对象。
+- **adapter JSON**（`adapters/<id>/<id>.json`）：声明宿主能力、阶段 agent 映射、模型路由、CLI 命令环境变量——`dispatch_phase.py` 的解析与校验对象；目录内含适配器说明 `<id>.md` 与子代理生成脚本 `provision.py`。
 - **TASK 文档**（`docs/project/`）：派发/校验的事实来源（元数据、1.1~1.5 冻结范围、阶段章节、证据链）。
 - **角色提示词**（`prompts/*.md`）：`dispatch_phase` 通过 `resolve_role_prompt` 定位并在信封中传递。
 
 ### 5.4 模块依赖图
 
 ```text
-bootstrap_sage.py ──复制──> [sage_linter.py, sage_dispatch.py(dispatch_phase), adapters/*.json] 到目标项目
+bootstrap_sage.py ──复制──> [sage_linter.py, sage_dispatch.py(dispatch_phase), adapters/<id>/] 到目标项目
                                  │
         sage_linter.py  ------------------------------------ 质量门禁
-        dispatch_phase.py ──读取──> adapters/*.json、TASK、prompts/*.md、git
+        dispatch_phase.py ──读取──> adapters/<id>/<id>.json、TASK、prompts/*.md、git
+        dispatch_phase.py ──委托──> adapters/<id>/provision.py（provision 子命令）
         dispatch_phase.py ──驱动──> subagent / injected / CLI 通道
         tests/test_dispatch_phase.py ──子进程──> dispatch_phase.py
 ```
@@ -349,9 +350,9 @@ uv run python skills/sage-workflow/core/scripts/dispatch_phase.py verify --recei
 uv run python skills/sage-workflow/core/scripts/dispatch_phase.py run-cli `
   --receipt <receipt> --command-json '["agent-cli","--prompt","{prompt}"]'
 
-# 生成宿主 agent 注册文件
+# 生成宿主 agent 注册文件（委托适配器脚本；codex→TOML，claude-code→Markdown）
 uv run python skills/sage-workflow/core/scripts/dispatch_phase.py provision `
-  --method toml-directory --target-dir <agents目录>
+  --adapter codex --target-dir <agents目录>
 ```
 
 ### 6.3 运行测试

@@ -45,13 +45,7 @@ ALLOWED_CONTEXT_FIELDS = ("REPO_ROOT", "TASK_PATH", "ROLE_PROMPT", "PHASE", "DIF
 SUBAGENT_MODEL_BINDINGS = {"none", "request", "agent-registration"}
 CLI_MODEL_BINDINGS = {"none", "command-argument"}
 CHANNEL_PRIORITY = {"subagent": 3, "injected": 2, "cli": 1}
-PROVISIONING_METHODS = {"toml-directory", "markdown-agents-directory", "none"}
 PROVISION_ROLES = ("reviewer", "coder", "closer")
-ROLE_PHASES = {
-    "reviewer": ("plan-review", "code-review"),
-    "coder": ("dev",),
-    "closer": ("close",),
-}
 
 
 class DispatchError(RuntimeError):
@@ -108,10 +102,11 @@ def parse_args() -> argparse.Namespace:
     add_adapter_args(doctor, require_repo=False)
     doctor.add_argument("--format", choices=("text", "json"), default="text")
 
-    provision = subparsers.add_parser("provision", help="生成宿主 agent 注册文件")
-    provision.add_argument("--method", required=True, choices=("toml-directory", "markdown-agents-directory"))
+    provision = subparsers.add_parser("provision", help="生成宿主 agent 注册文件（委托适配器 provision.py 执行）")
+    provision.add_argument("--adapter", required=True, help="adapter 名称（如 codex、claude-code）")
+    provision.add_argument("--repo-root", type=Path, help="项目根目录；提供时优先使用项目本地 execution-adapters 下的 provision.py")
     provision.add_argument("--target-dir", required=True, type=Path, help="宿主注册目录（如 ~/.codex/agents 或项目 .claude/agents）")
-    provision.add_argument("--model-provider", help="TOML 模板的 model_provider，默认 codex_shim")
+    provision.add_argument("--model-provider", help="TOML 模板的 model_provider（仅 codex 适配器消费），默认 codex_shim")
     provision.add_argument("--role", choices=PROVISION_ROLES, help="只生成指定角色；缺省生成全部")
     provision.add_argument("--force", action="store_true", help="覆盖已存在的注册文件")
     provision.add_argument("--format", choices=("text", "json"), default="text")
@@ -143,12 +138,13 @@ def ensure_within(path: Path, root: Path, label: str) -> Path:
 
 
 def profile_candidates(adapter: str, repo_root: Path | None) -> list[Path]:
+    """按"项目本地优先、Skill 内置兜底"返回 adapter JSON 候选路径（子目录结构 <id>/<id>.json）。"""
     candidates: list[Path] = []
     if repo_root:
-        candidates.append(repo_root / "docs" / "guides" / "execution-adapters" / f"{adapter}.json")
+        candidates.append(repo_root / "docs" / "guides" / "execution-adapters" / adapter / f"{adapter}.json")
     skill_root = discover_skill_root()
     if skill_root:
-        candidates.append(skill_root / "adapters" / f"{adapter}.json")
+        candidates.append(skill_root / "adapters" / adapter / f"{adapter}.json")
     return candidates
 
 
@@ -889,116 +885,48 @@ def doctor_probe(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-ROLE_INSTRUCTIONS = {
-    "reviewer": (
-        "Perform plan or code blind review only. Write the review report back to the TASK section "
-        "required by the role contract; the report must contain OK/WARN/BLOCK. Do not modify other files."
-    ),
-    "coder": (
-        "Implement only the frozen TASK scope (1.1~1.5). You are not alone in the codebase: "
-        "do not revert or overwrite others' changes."
-    ),
-    "closer": (
-        "Close out only completed scope: TASK closeout sections, changelog, archival. "
-        "Do not add new features; never merge, push, or deploy."
-    ),
-}
-
-
-def build_toml_agent(role: str, models: dict[str, Any], provider: str) -> tuple[str, str | None]:
-    phases = ROLE_PHASES[role]
-    ids = [models.get(phase, {}).get("id") for phase in phases]
-    model_id = next((item for item in ids if item), None)
-    warning = None
-    distinct = {item for item in ids if item}
-    if len(distinct) > 1:
-        warning = f"{role} 各阶段默认模型不一致：{sorted(distinct)}；已采用 {model_id}"
-    if not model_id:
-        model_id = "REPLACE_WITH_MODEL_ID"
-        warning = f"未解析到 {role} 默认模型；请替换 model 字段后再注册"
-    sandbox = "read-only" if role == "reviewer" else "workspace-write"
-    content = (
-        f'name = "sage_{role}"\n'
-        f'description = "SAGE {role} subagent for SAGE workflow phases: {", ".join(phases)}."\n'
-        "\n"
-        f'model = "{model_id}"\n'
-        f'model_provider = "{provider}"\n'
-        f'sandbox_mode = "{sandbox}"\n'
-        "\n"
-        'developer_instructions = """\n'
-        f"You are the SAGE {role} subagent. Follow the repository's {role} role prompt when a ROLE_PROMPT path is provided.\n"
-        "Read REPO_ROOT, TASK_PATH, ROLE_PROMPT, and PHASE from the task prompt; TASK metadata is the source of scheduling truth.\n"
-        f"{ROLE_INSTRUCTIONS[role]}\n"
-        "Reply in Chinese by default with evidence and changed files.\n"
-        '"""\n'
-    )
-    return content, warning
-
-
-def build_markdown_agent(role: str) -> str:
-    phases = ", ".join(ROLE_PHASES[role])
-    return (
-        "---\n"
-        f"name: sage-{role}\n"
-        f"description: SAGE {role} 子代理（阶段：{phases}）。按仓库当前权威 {role} 角色契约执行，产出写回 TASK 对应章节。\n"
-        "tools: Read, Write, Edit, Grep, Glob, Bash\n"
-        "---\n"
-        "\n"
-        f"你是 SAGE {role} 子代理。派发 prompt 会提供 REPO_ROOT、TASK_PATH、ROLE_PROMPT、PHASE。\n"
-        "先定位到 REPO_ROOT，读取 ROLE_PROMPT 与 TASK_PATH，任务调度事实以 TASK 元数据为准；"
-        "角色职责以 ROLE_PROMPT 指向的当前权威角色契约为唯一来源，本文件不复制角色规则。\n"
-        f"{ROLE_INSTRUCTIONS[role]}\n"
-    )
-
-
-def provision_agents(args: argparse.Namespace) -> dict[str, Any]:
-    target_dir = args.target_dir.resolve()
-    roles = [args.role] if args.role else list(PROVISION_ROLES)
-    models: dict[str, Any] = {}
-    models_source = "无（模型字段需人工填写）"
+def locate_provision_script(adapter: str, repo_root: Path | None) -> Path:
+    """定位适配器 provision 脚本：项目本地 execution-adapters 优先，Skill 内置 adapters 兜底。"""
+    if repo_root:
+        local = repo_root / "docs" / "guides" / "execution-adapters" / adapter / "provision.py"
+        if local.is_file():
+            return local.resolve()
     skill_root = discover_skill_root()
     if skill_root:
-        candidate = skill_root / "adapters" / "codex.json"
-        if candidate.is_file():
-            try:
-                profile = json.loads(candidate.read_text(encoding="utf-8"))
-                models = profile.get("models", {}) if isinstance(profile.get("models"), dict) else {}
-                models_source = str(candidate)
-            except json.JSONDecodeError:
-                models_source = f"{candidate}（JSON 无效，模型字段需人工填写）"
-    provider = args.model_provider or "codex_shim"
+        builtin = skill_root / "adapters" / adapter / "provision.py"
+        if builtin.is_file():
+            return builtin.resolve()
+    raise DispatchError(
+        f"adapter '{adapter}' 不提供子代理生成（未找到 adapters/{adapter}/provision.py）；"
+        "cli/generic-tool 无原生 subagent 注册能力"
+    )
 
-    target_dir.mkdir(parents=True, exist_ok=True)
-    results: list[dict[str, Any]] = []
-    for role in roles:
-        warning = None
-        if args.method == "toml-directory":
-            filename = f"sage-{role}.toml"
-            content, warning = build_toml_agent(role, models, provider)
-        else:
-            filename = f"sage-{role}.md"
-            content = build_markdown_agent(role)
-        target_path = target_dir / filename
-        if target_path.exists() and not args.force:
-            results.append({"role": role, "path": str(target_path), "status": "skipped", "note": "已存在；使用 --force 覆盖"})
-            continue
-        target_path.write_text(content, encoding="utf-8")
-        results.append({"role": role, "path": str(target_path), "status": "written", "note": warning})
-    post_steps = [
-        "重启或刷新宿主以加载新的 agent 注册；注册是否生效以宿主实际派发结果为准。",
-        "注册型模型变更必须同步 adapter JSON（models.<phase>），避免双源漂移。",
+
+def provision_delegate(args: argparse.Namespace) -> int:
+    """以 subprocess 委托适配器 provision.py 生成注册文件，透传参数与退出码（0/2 映射）。
+
+    生成格式由各适配器脚本自定（codex→TOML、claude-code→Markdown），
+    主入口只负责定位脚本、拼装透传参数并转发 stdout/stderr。
+    """
+    script = locate_provision_script(args.adapter, args.repo_root)
+    command = [
+        sys.executable,
+        str(script),
+        "--target-dir",
+        str(args.target_dir),
+        "--format",
+        args.format,
     ]
-    if args.method == "toml-directory":
-        post_steps.append("若目标目录位于宿主全局配置区（如 ~/.codex/agents），请人工确认放置位置，Skill 不代写工作区外配置。")
-    else:
-        post_steps.append("确认宿主会扫描项目 agents 目录（如 .claude/agents）；注册文件随仓库版本化分发。")
-    return {
-        "method": args.method,
-        "target_dir": str(target_dir),
-        "models_source": models_source,
-        "results": results,
-        "post_steps": post_steps,
-    }
+    if args.role:
+        command.extend(("--role", args.role))
+    if args.force:
+        command.append("--force")
+    if args.model_provider:
+        if args.adapter != "codex":
+            raise DispatchError("--model-provider 仅 codex 适配器（TOML 注册）消费；Markdown 生成不使用该参数")
+        command.extend(("--model-provider", args.model_provider))
+    completed = subprocess.run(command, check=False)
+    return completed.returncode
 
 
 def format_doctor(payload: dict[str, Any], output_format: str) -> str:
@@ -1012,23 +940,6 @@ def format_doctor(payload: dict[str, Any], output_format: str) -> str:
         )
         lines.append(f"    {check['note']}")
     lines.append(f"recommended_channel: {payload['recommended_channel'] or '无可用通道'}")
-    return "\n".join(lines)
-
-
-def format_provision(payload: dict[str, Any], output_format: str) -> str:
-    if output_format == "json":
-        return json.dumps(payload, ensure_ascii=False, indent=2)
-    lines = [
-        f"method: {payload['method']}",
-        f"target_dir: {payload['target_dir']}",
-        f"models_source: {payload['models_source']}",
-        "results:",
-    ]
-    for item in payload["results"]:
-        suffix = f"（{item['note']}）" if item.get("note") else ""
-        lines.append(f"  {item['role']}: {item['status']} -> {item['path']}{suffix}")
-    lines.append("后续步骤:")
-    lines.extend(f"  - {step}" for step in payload["post_steps"])
     return "\n".join(lines)
 
 
@@ -1074,9 +985,7 @@ def main() -> int:
             print(format_doctor(payload, args.format))
             return 0 if payload["recommended_channel"] else 1
         if args.command == "provision":
-            payload = provision_agents(args)
-            print(format_provision(payload, args.format))
-            return 0
+            return provision_delegate(args)
     except (DispatchError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

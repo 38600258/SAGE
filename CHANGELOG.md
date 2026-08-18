@@ -4,6 +4,13 @@
 > 注：历史条目原本只记录日期，迁移到单行标题格式时用 `00:00:00` 作为回溯补齐时间。
 
 
+## [1.2.0] ✨ Feature 适配器化子代理生成与 linter 阶段感知 (T-011) - 2026-08-19 06:39:16
+- 适配器化子代理生成（provision 下沉到各 IDE 适配器）：适配器目录从平铺 `adapters/*.json|md` 改为整目录 `adapters/<id>/`（cli/codex/generic-tool 迁移 + 新增 claude-code）；生成逻辑（`build_toml_agent`/`build_markdown_agent`/`ROLE_INSTRUCTIONS`）逐字迁入各自 `provision.py`，双入口可用（独立 argparse + `dispatch_phase.py provision --adapter <id>` 委托，项目本地优先、退出码透传）；主入口删除 `--method`/`PROVISIONING_METHODS`/`provision_agents`，新增 `--adapter` 必填，`--model-provider` 保留主入口并仅对 codex 委托透传（非 codex 拒绝退出码 2）；`profile_candidates` 两侧路径联动改子目录结构；bootstrap 复制计划改整目录（含 provision.py）。
+- 修复 sage_linter.py `check_evidence_complete` 阶段感知缺陷：按 TASK 元数据 `当前阶段` 判定，仅 code-review/close 强制校验 3.2 证据链，init/plan-review/dev 期跳过并提示；元数据缺失或未知阶段维持强制（fail-safe）。此前 init 期对模板默认未勾选的证据链误报阻断，提前勾选反而属于伪造证据。
+- 顺带修复 HEAD 提交 4fac1b7（codex.json 模型切至 GPT-5.6 系列）未同步的 4 处测试断言失配（test_prepare_native_subagent_envelope_and_verify_real_output 与 provision TOML 用例在 HEAD 上本就失败）；同步新增 linter 阶段感知三态单测（test_sage_linter.py，26/26 全绿）。
+- 六处文档同步新结构：path-registry.md / dispatch-protocol.md / SKILL.md / execution-channels.md 5.6 / CODE_WIKI.md（含超出 1.4 声明行号的目录结构联动，盲审已核验必要性）/ KNOWN_PATTERNS.md BP-013；provision 委托示例补 `--repo-root`（委托化后 bootstrap 项目内必需，缺省会脚本定位失败，TD-1）。
+- 遗留技术债：TD-2（locate_provision_script 报错语义区分）、TD-3（质量门禁不运行单测的系统性盲区）、TD-4（bootstrap rglob 未过滤 `__pycache__`）——详见归档任务 5.1。
+
 ## [1.1.1] 📚 Docs SAGE 1.0 发布前内容卫生 (T-010) - 2026-08-18 07:27:00
 - 两份方法论文档去工具化：移除全部 Antigravity 2.0 专属工具映射（39 处），改为工具无关通用表述，宿主能力要求指向 adapters/ 与执行通道指南。
 - 校验项数量对齐：sage_linter.py 输出编号统一为 [X/15]，docstring 与方法论数量表述同步为 15 项。
