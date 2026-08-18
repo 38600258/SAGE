@@ -4,6 +4,14 @@
 > 注：历史条目原本只记录日期，迁移到单行标题格式时用 `00:00:00` 作为回溯补齐时间。
 
 
+## [1.1.1] 📚 Docs SAGE 1.0 发布前内容卫生 (T-010) - 2026-08-18 07:27:00
+- 两份方法论文档去工具化：移除全部 Antigravity 2.0 专属工具映射（39 处），改为工具无关通用表述，宿主能力要求指向 adapters/ 与执行通道指南。
+- 校验项数量对齐：sage_linter.py 输出编号统一为 [X/15]，docstring 与方法论数量表述同步为 15 项。
+- 模式库清理：删除 8 条演示 SaaS 项目残留条目（BP-001~003、AP-001~003、DP-001~002），加删除说明。
+- CHANGELOG 回溯补正：为 0.1.0/0.2.0 演示条目和 1.0.0 时间戳归属追加补正标注。
+- core/VERSION baseline_commit 更新至 7589a91（T-008 最终提交）。
+- README 新增"适用场景与流程重量"节，明确目标用户画像。
+
 ## [1.1.0] ✨ Feature 注入式子代理通道与 doctor/provision 通道治理 (T-009) - 2026-08-16 21:40:00
 - 为 Dispatcher 增加第二等执行通道 `injected_subagent`（宿主注入式子代理），解决不同宿主子代理设置方式不一致导致的派发阻塞：
   - adapter 可声明 `injected_subagent`（supported/isolation/requires_authorization/agent_types）；`auto` 通道选择优先级为 subagent > injected > cli。
@@ -16,6 +24,8 @@
 - 说明：本变更因工作流运行时阻塞经人工授权以轻量方式落地，未创建 TASK 文档；T-008 代码盲审将使用本通道解除阻塞。
 
 ## [1.0.0] ✨ Feature 发布 SAGE workflow skill 默认发行版 (T-008) - 2026-06-01 17:10:00
+
+> ⚠️ **回溯补正（T-010, 2026-08-18）**：本条目标题时间戳为 2026-06-01，但内容包含 2026-07-23 追加的运行时派发与模型路由范围。按 changelog-standards"只增不改"原则不回改历史标题；此处标注实际交付时间线。07-23 追加范围按 BP-005 本应独立为 1.1.0，因与 1.0.0 同属 T-008 任务交付物且已在同一提交中落库，维持当前归属并在本标注中说明。
 - 将 SAGE 工作流封装为 `skills/sage-workflow/` 默认发行版：
   - 内置 `core/entry/`、`core/prompts/`、`core/templates/`、`core/guides/` 和 `core/methodology/`，支持新项目 Standalone/bootstrap。
   - 新增 `core/VERSION` 记录 `1.0.0`、基线提交和同步锚点，降低后续迁移漂移风险。
@@ -72,6 +82,8 @@
 ---
 
 ## [0.2.0] ✨ Feature 用户认证与基础工程规范 (T-001) - 2026-05-18 00:00:00
+
+> ⚠️ **回溯补正（T-010, 2026-08-18）**：同上，本条目为演示项目历史。
 - T-001: 用户注册接口（`POST /api/v1/auth/register`）
 - T-001: 用户登录接口（`POST /api/v1/auth/login`）
 - T-001: JWT 认证中间件（Access Token 15min + Refresh Token 7d）
@@ -83,6 +95,8 @@
 ---
 
 ## [0.1.0] ✨ Feature 项目初始化与基础脚手架 (INIT) - 2026-05-10 00:00:00
+
+> ⚠️ **回溯补正（T-010, 2026-08-18）**：本条目及 0.2.0 为仓库初始化时的演示脚手架历史，不对应 SAGE 工作流的真实交付。保留仅为版本连续性，不代表当前功能。
 - 项目初始化：Express.js + TypeScript + Prisma 脚手架
 - PostgreSQL 数据库连接与基础配置
 - Docker Compose 开发环境配置

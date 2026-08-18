@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SAGE 工作流检查器 (SAGE Linter)
 
-此脚本集成了方法论中要求的所有 13 个检查器，不依赖任何第三方 Python 库，
+此脚本集成了方法论中要求的所有 15 个检查器，不依赖任何第三方 Python 库，
 仅使用标准库及本地 git 命令。可以在任何智能体或人类开发流程中独立运行。
 
 SAGE = Steer, Agent Goes Execute (人类掌舵，智能体执行)
@@ -274,7 +274,7 @@ class ResultCollector:
 
 
 # ==============================================================================
-# 13 个检查器核心实现
+# 15 个检查器核心实现
 # ==============================================================================
 
 def check_template_copy(task_file, template_file):
@@ -1215,7 +1215,7 @@ def main():
             print()
 
     # ======================================================================
-    # 场景 B: 一键全量校验 (一键运行全部 13 个检查器)
+    # 场景 B: 一键全量校验 (一键运行全部 15 个检查器)
     # ======================================================================
     if args.all or not args.check_task:
         # 如果 check_task 已运行，需要一个新的收集器用于全量（或合并）
@@ -1238,47 +1238,47 @@ def main():
 
         # 1. 物理分支隔离校验
         ok, msg = check_git_branch_isolation(sage_root, args.allow_protected_branch)
-        collector.add("[4/13] 分支隔离校验", ok, msg)
+        collector.add("[4/15] 分支隔离校验", ok, msg)
 
         # 2. 模板守护校验
         if args.allow_template_changes:
             ok, msg = True, "模板变更已由 --allow-template-changes 显式允许"
         else:
             ok, msg = check_templates_pristine(templates_dir, sage_root)
-        collector.add("[7/13] 模板完整校验", ok, msg)
+        collector.add("[7/15] 模板完整校验", ok, msg)
 
         # 3. 只增不改日志校验
         ok, msg = check_append_only(decision_log_file, sage_root)
-        collector.add("[9/13] 日志增改限制", ok, msg)
+        collector.add("[9/15] 日志增改限制", ok, msg)
 
         # 4. CHANGELOG 联动更新校验
         ok, msg = check_changelog_update(changelog_file, sage_root)
-        collector.add("[8/13] 日志更新联动", ok, msg)
+        collector.add("[8/15] 日志更新联动", ok, msg)
 
         # 5. T2 规范体积校验
         ok, msg = check_t2_document_lines(docs_dir)
-        collector.add("[5/13] 规范文档体积", ok, msg)
+        collector.add("[5/15] 规范文档体积", ok, msg)
 
         # 6. 本地交叉引用验证 — 扫描整个项目根目录
         ok, msg = check_cross_links(sage_root)
-        collector.add("[11/13] 交叉引用校验", ok, msg)
+        collector.add("[11/15] 交叉引用校验", ok, msg)
 
         # 7. 文档新鲜度扫描 (警告级)
         ok, msg = check_document_freshness(docs_dir, args.stale_days)
-        collector.add("[6/13] 文档新鲜扫描", ok, msg)
+        collector.add("[6/15] 文档新鲜扫描", ok, msg)
 
         # [FIX DESIGN-3] 如果已通过 --check-task 单独校验过，不再重复执行任务级校验
         if task_file and not args.check_task:
             if args.format == "text":
                 print("\n--- 任务级细节深度扫描 ---")
             task_checkers = [
-                (lambda: check_template_copy(task_file, template_file), "[1/13] 模板复制校验"),
-                (lambda: check_task_structure(task_file), "[2/13] 任务大纲校验"),
-                (lambda: check_task_risk_sections(task_file), "[3/13] 风险扩展校验"),
-                (lambda: check_scope_lock(task_file, sage_root), "[10/13] 范围锁定校验"),
-                (lambda: check_evidence_complete(task_file), "[12/13] 证据链校验"),
-                (lambda: check_review_complete(task_file), "[13/14] 盲审结果校验"),
-                (lambda: check_model_metadata(task_file), "[14/14] 模型元数据校验"),
+                (lambda: check_template_copy(task_file, template_file), "[1/15] 模板复制校验"),
+                (lambda: check_task_structure(task_file), "[2/15] 任务大纲校验"),
+                (lambda: check_task_risk_sections(task_file), "[3/15] 风险扩展校验"),
+                (lambda: check_scope_lock(task_file, sage_root), "[10/15] 范围锁定校验"),
+                (lambda: check_evidence_complete(task_file), "[12/15] 证据链校验"),
+                (lambda: check_review_complete(task_file), "[13/15] 盲审结果校验"),
+                (lambda: check_model_metadata(task_file), "[14/15] 模型元数据校验"),
                 (lambda: check_execution_channel_records(task_file), "[15/15] 执行通道记录校验"),
             ]
             for func, name in task_checkers:
