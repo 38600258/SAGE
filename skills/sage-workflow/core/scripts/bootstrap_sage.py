@@ -40,6 +40,14 @@ def render_project_guide(content: str) -> str:
     return content.replace("../entry/AGENTS.md", "../../AGENTS.md")
 
 
+def _is_build_artifact(path: Path) -> bool:
+    """判断路径是否为 Python 构建产物（TD-4）：任一父目录名 '__pycache__' 或文件后缀 .pyc/.pyo。
+
+    集中式单一实现，保证 build_plan 内多处 rglob 过滤口径一致（避免两处漂移）。
+    """
+    return any(part == "__pycache__" for part in path.parts) or path.suffix in (".pyc", ".pyo")
+
+
 def build_plan(repo_root: Path) -> list[tuple[Path, Path, str | None]]:
     plan: list[tuple[Path, Path, str | None]] = []
     for source, target in (
@@ -51,7 +59,7 @@ def build_plan(repo_root: Path) -> list[tuple[Path, Path, str | None]]:
         (CORE_ROOT / "githooks", repo_root / ".githooks"),
     ):
         for source_file in source.rglob("*"):
-            if source_file.is_file():
+            if source_file.is_file() and not _is_build_artifact(source_file):
                 relative = source_file.relative_to(source)
                 target_file = target / relative
                 transform = None
@@ -66,7 +74,7 @@ def build_plan(repo_root: Path) -> list[tuple[Path, Path, str | None]]:
         if not adapter_dir.is_dir():
             continue
         for source_file in sorted(adapter_dir.rglob("*")):
-            if not source_file.is_file():
+            if not source_file.is_file() or _is_build_artifact(source_file):
                 continue
             relative = source_file.relative_to(adapters_root)
             plan.append(
@@ -82,6 +90,12 @@ def build_plan(repo_root: Path) -> list[tuple[Path, Path, str | None]]:
         ("dispatch_phase.py", "sage_dispatch.py"),
     ):
         plan.append((CORE_ROOT / "scripts" / script_name, repo_root / "scripts" / target_name, None))
+    # TD-6：透传可移植的测试资产，使 bootstrap 项目 check_unit_tests 门禁真实生效；
+    # 仅透传 test_sage_linter.py + __init__.py，不透传依赖 skill 内置布局的 test_dispatch_phase.py
+    for test_name in ("test_sage_linter.py", "__init__.py"):
+        test_source = CORE_ROOT / "scripts" / "tests" / test_name
+        if test_source.is_file():
+            plan.append((test_source, repo_root / "scripts" / "tests" / test_name, None))
     for name in ("AGENTS.md", "AGENTS.override.md", "GEMINI.md"):
         plan.append((CORE_ROOT / "entry" / name, repo_root / name, "entry"))
     return plan

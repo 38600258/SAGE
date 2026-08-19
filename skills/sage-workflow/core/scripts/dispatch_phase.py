@@ -886,7 +886,14 @@ def doctor_probe(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def locate_provision_script(adapter: str, repo_root: Path | None) -> Path:
-    """定位适配器 provision 脚本：项目本地 execution-adapters 优先，Skill 内置 adapters 兜底。"""
+    """定位适配器 provision 脚本：项目本地 execution-adapters 优先，Skill 内置 adapters 兜底。
+
+    报错语义区分三种情况（TD-2）：
+    1. candidate provision.py 全缺失时，先经 profile_candidates 探测 adapter JSON：
+       - 均无 JSON → 适配器不存在/未知 → "找不到 adapter"（附排查提示）
+       - 有 JSON 但无 provision → 适配器声明无子代理生成能力 → "不提供子代理生成"
+    2. 正常定位成功直接返回脚本路径。
+    """
     if repo_root:
         local = repo_root / "docs" / "guides" / "execution-adapters" / adapter / "provision.py"
         if local.is_file():
@@ -896,9 +903,14 @@ def locate_provision_script(adapter: str, repo_root: Path | None) -> Path:
         builtin = skill_root / "adapters" / adapter / "provision.py"
         if builtin.is_file():
             return builtin.resolve()
+    # candidate provision 全缺失：先探测 adapter JSON 是否存在以区分两种语义
+    has_adapter_json = any(candidate.is_file() for candidate in profile_candidates(adapter, repo_root))
+    if has_adapter_json:
+        raise DispatchError(
+            f"adapter '{adapter}' 不提供子代理生成（未找到 adapters/{adapter}/provision.py）"
+        )
     raise DispatchError(
-        f"adapter '{adapter}' 不提供子代理生成（未找到 adapters/{adapter}/provision.py）；"
-        "cli/generic-tool 无原生 subagent 注册能力"
+        f"找不到 adapter '{adapter}'（请检查适配器 id 拼写；若运行在独立环境请确认 skill 已挂载或指定 --repo-root）"
     )
 
 

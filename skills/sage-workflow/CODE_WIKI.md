@@ -100,11 +100,13 @@
 | `dispatch_phase.py` | 跨宿主阶段派发协议层 | 仅 Python 标准库 + git |
 | `bootstrap_sage.py` | 将默认发行版复制进新项目 | 仅 Python 标准库 + git |
 | `tests/test_dispatch_phase.py` | dispatch 的 `unittest` 测试 | unittest |
+| `tests/test_sage_linter.py` | linter 的 `unittest` 测试（bootstrap 透传资产） | unittest |
+| `tests/test_bootstrap_sage_build_plan.py` | bootstrap 复制计划的 `unittest` 测试 | unittest |
 
 三者均**零第三方依赖**，只用标准库与本地 `git` 命令，保证可在任何智能体环境独立运行。
 
 **模块间关系**：
-`bootstrap_sage.py` 把 `sage_linter.py`、`dispatch_phase.py`（重命名为 `sage_dispatch.py`）以及 adapters 复制到目标项目
+`bootstrap_sage.py` 把 `sage_linter.py`、`dispatch_phase.py`（重命名为 `sage_dispatch.py`）、adapters 以及 tests 透传资产（`test_sage_linter.py` + `__init__.py`）复制到目标项目
 → 项目运行时由 `sage_linter.py` 做质量门禁、由 `dispatch_phase.py` 做阶段派发与实际产出验证。
 
 ---
@@ -280,6 +282,15 @@
 - doctor 通道探测（generic-tool 推荐 injected；cli 无可定位命令=不可用）
 - provision 两种模板生成 + 默认不覆盖已存在文件
 
+### 4.5 `tests/test_bootstrap_sage_build_plan.py` — bootstrap 复制计划测试
+
+基于 `unittest`，以独立模块名加载 `bootstrap_sage.py` 并 monkeypatch `CORE_ROOT`/`SKILL_ROOT` 到临时目录，覆盖：
+- TD-4 构建产物过滤：`__pycache__`/`.pyc` 排除在复制计划外
+- TD-6 tests 透传名单：含 `test_sage_linter.py` + `__init__.py`，不含 `test_dispatch_phase.py`
+- 既有脚本复制不回归（`sage_linter.py` / `sage_dispatch.py`）
+
+> 注：`test_sage_linter.py` 是 bootstrap 唯一透传的测试资产，严禁注入 `bootstrap_sage`/repository 级依赖。
+
 ---
 
 ## 5. 依赖关系
@@ -303,13 +314,14 @@
 ### 5.4 模块依赖图
 
 ```text
-bootstrap_sage.py ──复制──> [sage_linter.py, sage_dispatch.py(dispatch_phase), adapters/<id>/] 到目标项目
+bootstrap_sage.py ──复制──> [sage_linter.py, sage_dispatch.py(dispatch_phase), adapters/<id>/, tests/{test_sage_linter.py, __init__.py}] 到目标项目
                                  │
         sage_linter.py  ------------------------------------ 质量门禁
         dispatch_phase.py ──读取──> adapters/<id>/<id>.json、TASK、prompts/*.md、git
         dispatch_phase.py ──委托──> adapters/<id>/provision.py（provision 子命令）
         dispatch_phase.py ──驱动──> subagent / injected / CLI 通道
         tests/test_dispatch_phase.py ──子进程──> dispatch_phase.py
+        tests/test_bootstrap_sage_build_plan.py ──monkeypatch──> bootstrap_sage.py(build_plan)
 ```
 
 ---
