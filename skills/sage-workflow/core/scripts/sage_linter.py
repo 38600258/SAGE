@@ -818,6 +818,14 @@ def check_evidence_complete(task_file):
 
     content = "".join(get_file_lines(task_path))
 
+    # 阶段感知：证据链在开发完成（code-review/close）后才强制校验。
+    # init/plan-review/dev 期 3.2 复选框本应留空，提前勾选反而属于伪造证据；
+    # 元数据缺失或未知阶段时维持强制（fail-safe），与 check_execution_channel_records 的阶段感知设计一致。
+    stage_match = re.search(r'-\s*\*\*当前阶段\*\*:\s*([a-z-]+)', content)
+    current_stage = stage_match.group(1).strip() if stage_match else ""
+    if current_stage in ("init", "plan-review", "dev"):
+        return True, f"💡 提示：当前阶段为 {current_stage}，3.2 证据链尚未到期，跳过校验。"
+
     # 提取 3.2 🧪 证据链 小节（兼容有/无 Emoji 的写法）
     idx_ev = content.find("### 3.2 🧪 证据链")
     if idx_ev == -1:

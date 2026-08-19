@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "claude-code",
+  "display_name": "Claude Code",
+  "native_subagent": {
+    "supported": true,
+    "invoker": "host",
+    "agent_types": {
+      "plan-review": "sage-reviewer",
+      "dev": "sage-coder",
+      "code-review": "sage-reviewer",
+      "close": "sage-closer"
+    }
+  },
+  "models": {
+    "plan-review": {
+      "id": null,
+      "subagent_binding": "none",
+      "cli_binding": "none"
+    },
+    "dev": {
+      "id": null,
+      "subagent_binding": "none",
+      "cli_binding": "none"
+    },
+    "code-review": {
+      "id": null,
+      "subagent_binding": "none",
+      "cli_binding": "none"
+    },
+    "close": {
+      "id": null,
+      "subagent_binding": "none",
+      "cli_binding": "none"
+    }
+  },
+  "cli": {
+    "supported": false,
+    "invoker": "none"
+  }
+}

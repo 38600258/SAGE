@@ -4,10 +4,10 @@
 
 ## Adapter JSON
 
-解析顺序：
+解析顺序（子目录结构 `<adapter>/<adapter>.json`，目录内含该适配器的 md 说明与 provision.py）：
 
-1. 项目本地 `docs/guides/execution-adapters/<adapter>.json`
-2. Skill 内置 `adapters/<adapter>.json`
+1. 项目本地 `docs/guides/execution-adapters/<adapter>/<adapter>.json`
+2. Skill 内置 `adapters/<adapter>/<adapter>.json`
 3. 显式 `--adapter-file <path>` 覆盖上述查找
 
 最小结构：
@@ -71,7 +71,7 @@
 ## doctor 与 provision
 
 - `doctor`：逐通道探测可用性并输出推荐通道。原生通道按声明判定；注入式通道校验 `agent_types` 完整性；CLI 通道只探测可执行文件可否定位，不执行命令。无可用通道时退出码为 1。
-- `provision`：按宿主生成 agent 注册文件。`toml-directory` 面向 Codex 全局注册（模型取自 skill 内置 codex.json）；`markdown-agents-directory` 面向项目内 agents 目录（如 Claude Code）。默认不覆盖已存在文件；注册是否生效以宿主实际派发为准。
+- `provision`：委托适配器脚本生成 agent 注册文件，`--adapter <id>` 必填。生成逻辑位于 `adapters/<id>/provision.py`（项目本地 `docs/guides/execution-adapters/<id>/provision.py` 优先），可独立运行，也可由 `dispatch_phase.py provision --adapter <id>` 以 subprocess 委托执行并透传 `--target-dir / --role / --force / --format`（codex 额外透传 `--model-provider`）。`--adapter codex` 生成 TOML 注册（模型取自同目录 codex.json）；`--adapter claude-code` 生成项目内 Markdown agents。cli/generic-tool 无原生 subagent，不提供 provision（报错退出码 2）。默认不覆盖已存在文件；注册是否生效以宿主实际派发为准。
 
 ## 派发状态
 

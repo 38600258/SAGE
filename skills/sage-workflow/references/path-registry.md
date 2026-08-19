@@ -22,7 +22,8 @@
 | Git 规范 | `docs/guides/git-standards.md` | `core/guides/git-standards.md` |
 | 质量门禁 | `scripts/sage_linter.py` | `core/scripts/sage_linter.py` |
 | 阶段派发器 | `scripts/sage_dispatch.py` | `core/scripts/dispatch_phase.py` |
-| 执行 adapter | `docs/guides/execution-adapters/*.json` | `adapters/*.json` |
+| 执行 adapter | `docs/guides/execution-adapters/<id>/<id>.json` | `adapters/<id>/<id>.json` |
+| 子代理生成脚本 | `docs/guides/execution-adapters/<id>/provision.py` | `adapters/<id>/provision.py` |
 | 派发协议 | 项目执行通道指南 | `references/dispatch-protocol.md` |
 | Bootstrap 工具 | skill 提供的 bootstrap 命令 | `core/scripts/bootstrap_sage.py` |
 | 提交 hooks | `.githooks/*` | `core/githooks/*` |

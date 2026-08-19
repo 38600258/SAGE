@@ -59,14 +59,23 @@ def build_plan(repo_root: Path) -> list[tuple[Path, Path, str | None]]:
                     transform = "guide"
                 plan.append((source_file, target_file, transform))
 
-    for source_file in (SKILL_ROOT / "adapters").glob("*.json"):
-        plan.append(
-            (
-                source_file,
-                repo_root / "docs" / "guides" / "execution-adapters" / source_file.name,
-                None,
+    # 适配器整目录复制（<id>/<id>.json + <id>.md + provision.py 等），保持子目录结构不变，
+    # 使 bootstrap 后项目可脱离 skill 目录运行派发协议与子代理生成
+    adapters_root = SKILL_ROOT / "adapters"
+    for adapter_dir in sorted(adapters_root.iterdir()):
+        if not adapter_dir.is_dir():
+            continue
+        for source_file in sorted(adapter_dir.rglob("*")):
+            if not source_file.is_file():
+                continue
+            relative = source_file.relative_to(adapters_root)
+            plan.append(
+                (
+                    source_file,
+                    repo_root / "docs" / "guides" / "execution-adapters" / relative,
+                    None,
+                )
             )
-        )
 
     for script_name, target_name in (
         ("sage_linter.py", "sage_linter.py"),
@@ -134,7 +143,12 @@ def main() -> int:
             print(f"跳过已存在文件：{target.relative_to(repo_root)}")
             continue
         if args.dry_run:
-            print(f"将复制：{source.relative_to(CORE_ROOT)} -> {target.relative_to(repo_root)}")
+            # adapters 等来源不在 CORE_ROOT 下，统一改用相对 SKILL_ROOT 的路径展示
+            try:
+                source_display = source.relative_to(CORE_ROOT)
+            except ValueError:
+                source_display = source.relative_to(SKILL_ROOT)
+            print(f"将复制：{source_display} -> {target.relative_to(repo_root)}")
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         if transform == "entry":

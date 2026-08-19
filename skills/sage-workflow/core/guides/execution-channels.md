@@ -165,14 +165,14 @@ CLI fallback 只在更高优先级通道不可用、已复核现场、已尝试�
 
 ### 5.6 通道 provisioning
 
-宿主 agent 注册缺失或漂移时，用 `provision` 生成注册文件：
+宿主 agent 注册缺失或漂移时，用 `provision` 生成注册文件。委托模式（经 sage_dispatch.py 转发到适配器 provision.py）在 bootstrap 后的项目内运行必须带 `--repo-root <repo>`（项目根无 SKILL.md 与 adapters 目录，缺省时脚本定位失败）：
 
 ```powershell
 # Codex 全局 TOML 注册（生成后人工放置到 ~/.codex/agents，Skill 不代写工作区外配置）
-uv run python scripts/sage_dispatch.py provision --method toml-directory --target-dir <agents 目录>
+uv run python scripts/sage_dispatch.py provision --repo-root <repo> --adapter codex --target-dir <agents 目录>
 
 # Claude Code 等项目内 agents 目录（随仓库版本化）
-uv run python scripts/sage_dispatch.py provision --method markdown-agents-directory --target-dir <repo>\.claude\agents
+uv run python scripts/sage_dispatch.py provision --repo-root <repo> --adapter claude-code --target-dir <repo>\.claude\agents
 ```
 
 生成后必须重启/刷新宿主，并用最小派发探针验证注册生效；注册是否可用以宿主实际派发结果为准，provision 本身不证明可用。
