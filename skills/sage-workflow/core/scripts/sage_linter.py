@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SAGE 工作流检查器 (SAGE Linter)
 
-此脚本集成了方法论中要求的所有 15 个检查器，不依赖任何第三方 Python 库，
+此脚本集成了方法论中要求的所有 16 个检查器，不依赖任何第三方 Python 库，
 仅使用标准库及本地 git 命令。可以在任何智能体或人类开发流程中独立运行。
 
 SAGE = Steer, Agent Goes Execute (人类掌舵，智能体执行)
@@ -274,7 +274,7 @@ class ResultCollector:
 
 
 # ==============================================================================
-# 15 个检查器核心实现
+# 16 个检查器核心实现
 # ==============================================================================
 
 def check_template_copy(task_file, template_file):
@@ -1040,6 +1040,63 @@ def check_execution_channel_records(task_file):
     return True, f"阶段执行通道记录校验通过 (当前阶段: {current_stage}, 风险等级: {risk_level})"
 
 
+def check_unit_tests(tests_dir=None, timeout=600):
+    """16. 单元测试执行: 以子进程真实执行 linter 同级 tests 目录的单测套件
+
+    [TD-3 修复] --all 此前仅做静态扫描不执行测试，测试断言失配可在门禁
+    绿灯下长期潜伏主干（HEAD 提交 4fac1b7 的 4 处断言失配实锤）。本检查器
+    让 --all 升级为「静态扫描 + 真实执行」双保险：
+    - 目录缺失或无 test_*.py → 跳过提示（bootstrap 项目可能不含测试，不强制）；
+    - 存在测试 → 以 sys.executable -m unittest discover 子进程执行；
+    - 测试失败或执行超时 → 按阻断处理（--all 退出码 2）。
+
+    tests_dir / timeout 均可注入：单测在临时目录上验证三态行为，
+    避免用例内递归触发本套件所在的 --all 全量路径。
+    """
+    # 以 linter 脚本自身位置定位测试目录：Skill 内置布局（core/scripts/tests）
+    # 与 bootstrap 后布局（项目 scripts/tests）均适用
+    tests_path = Path(tests_dir) if tests_dir is not None else Path(__file__).parent / "tests"
+
+    # 跳过语义：目录缺失或无测试文件属合法布局（如 bootstrap 项目），非阻断
+    if not tests_path.is_dir():
+        return True, f"💡 提示：测试目录不存在，跳过单测执行: {tests_path}"
+    if not list(tests_path.glob("test_*.py")):
+        return True, f"💡 提示：测试目录无 test_*.py 用例，跳过单测执行: {tests_path}"
+
+    # 用当前解释器真实执行测试套件；强制子进程 UTF-8 输出，避免结果解码乱码
+    cmd = [sys.executable, "-m", "unittest", "discover",
+           "-s", str(tests_path), "-p", "test_*.py"]
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            env=env,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except subprocess.TimeoutExpired:
+        return False, (
+            f"单元测试执行超时（>{timeout} 秒），按失败处理。"
+            f"可单独运行 `{' '.join(cmd)}` 定位慢用例。"
+        )
+
+    if result.returncode != 0:
+        # unittest 结果写入 stderr，截取尾部核心失败信息便于定位
+        detail_lines = (result.stderr or "").strip().splitlines()
+        detail = "\n".join(detail_lines[-12:]) if detail_lines else "(无输出)"
+        return False, f"单元测试存在失败（退出码 {result.returncode}）：\n{detail}"
+
+    # 从 stderr 提取 "Ran N tests in Xs" 摘要行
+    ran_line = ""
+    for line in (result.stderr or "").splitlines():
+        if line.strip().startswith("Ran "):
+            ran_line = line.strip()
+    return True, f"单元测试执行通过（{ran_line}）" if ran_line else "单元测试执行通过"
+
+
 # ==============================================================================
 # 活跃任务定位辅助
 # ==============================================================================
@@ -1223,7 +1280,7 @@ def main():
             print()
 
     # ======================================================================
-    # 场景 B: 一键全量校验 (一键运行全部 15 个检查器)
+    # 场景 B: 一键全量校验 (一键运行全部 16 个检查器)
     # ======================================================================
     if args.all or not args.check_task:
         # 如果 check_task 已运行，需要一个新的收集器用于全量（或合并）
@@ -1246,52 +1303,57 @@ def main():
 
         # 1. 物理分支隔离校验
         ok, msg = check_git_branch_isolation(sage_root, args.allow_protected_branch)
-        collector.add("[4/15] 分支隔离校验", ok, msg)
+        collector.add("[4/16] 分支隔离校验", ok, msg)
 
         # 2. 模板守护校验
         if args.allow_template_changes:
             ok, msg = True, "模板变更已由 --allow-template-changes 显式允许"
         else:
             ok, msg = check_templates_pristine(templates_dir, sage_root)
-        collector.add("[7/15] 模板完整校验", ok, msg)
+        collector.add("[7/16] 模板完整校验", ok, msg)
 
         # 3. 只增不改日志校验
         ok, msg = check_append_only(decision_log_file, sage_root)
-        collector.add("[9/15] 日志增改限制", ok, msg)
+        collector.add("[9/16] 日志增改限制", ok, msg)
 
         # 4. CHANGELOG 联动更新校验
         ok, msg = check_changelog_update(changelog_file, sage_root)
-        collector.add("[8/15] 日志更新联动", ok, msg)
+        collector.add("[8/16] 日志更新联动", ok, msg)
 
         # 5. T2 规范体积校验
         ok, msg = check_t2_document_lines(docs_dir)
-        collector.add("[5/15] 规范文档体积", ok, msg)
+        collector.add("[5/16] 规范文档体积", ok, msg)
 
         # 6. 本地交叉引用验证 — 扫描整个项目根目录
         ok, msg = check_cross_links(sage_root)
-        collector.add("[11/15] 交叉引用校验", ok, msg)
+        collector.add("[11/16] 交叉引用校验", ok, msg)
 
         # 7. 文档新鲜度扫描 (警告级)
         ok, msg = check_document_freshness(docs_dir, args.stale_days)
-        collector.add("[6/15] 文档新鲜扫描", ok, msg)
+        collector.add("[6/16] 文档新鲜扫描", ok, msg)
 
         # [FIX DESIGN-3] 如果已通过 --check-task 单独校验过，不再重复执行任务级校验
         if task_file and not args.check_task:
             if args.format == "text":
                 print("\n--- 任务级细节深度扫描 ---")
             task_checkers = [
-                (lambda: check_template_copy(task_file, template_file), "[1/15] 模板复制校验"),
-                (lambda: check_task_structure(task_file), "[2/15] 任务大纲校验"),
-                (lambda: check_task_risk_sections(task_file), "[3/15] 风险扩展校验"),
-                (lambda: check_scope_lock(task_file, sage_root), "[10/15] 范围锁定校验"),
-                (lambda: check_evidence_complete(task_file), "[12/15] 证据链校验"),
-                (lambda: check_review_complete(task_file), "[13/15] 盲审结果校验"),
-                (lambda: check_model_metadata(task_file), "[14/15] 模型元数据校验"),
-                (lambda: check_execution_channel_records(task_file), "[15/15] 执行通道记录校验"),
+                (lambda: check_template_copy(task_file, template_file), "[1/16] 模板复制校验"),
+                (lambda: check_task_structure(task_file), "[2/16] 任务大纲校验"),
+                (lambda: check_task_risk_sections(task_file), "[3/16] 风险扩展校验"),
+                (lambda: check_scope_lock(task_file, sage_root), "[10/16] 范围锁定校验"),
+                (lambda: check_evidence_complete(task_file), "[12/16] 证据链校验"),
+                (lambda: check_review_complete(task_file), "[13/16] 盲审结果校验"),
+                (lambda: check_model_metadata(task_file), "[14/16] 模型元数据校验"),
+                (lambda: check_execution_channel_records(task_file), "[15/16] 执行通道记录校验"),
             ]
             for func, name in task_checkers:
                 ok, msg = func()
                 collector.add(name, ok, msg)
+
+        # 8. 单元测试执行（TD-3：门禁从纯静态扫描升级为真实执行测试套件）
+        # 无条件执行（不依赖活跃任务存在）；失败/超时 → 阻断（退出码 2）
+        ok, msg = check_unit_tests(timeout=600)
+        collector.add("[16/16] 单元测试执行", ok, msg)
 
         if args.format == "text":
             print("\n================================================================")

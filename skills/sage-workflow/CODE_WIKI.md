@@ -96,7 +96,7 @@
 
 | 文件 | 定位 | 依赖 |
 |---|---|---|
-| `sage_linter.py` | 质量门禁（15 个检查器） | 仅 Python 标准库 + git |
+| `sage_linter.py` | 质量门禁（16 个检查器） | 仅 Python 标准库 + git |
 | `dispatch_phase.py` | 跨宿主阶段派发协议层 | 仅 Python 标准库 + git |
 | `bootstrap_sage.py` | 将默认发行版复制进新项目 | 仅 Python 标准库 + git |
 | `tests/test_dispatch_phase.py` | dispatch 的 `unittest` 测试 | unittest |
@@ -113,7 +113,7 @@
 
 ### 4.1 `sage_linter.py` — 质量门禁
 
-**作用**：集中了方法论要求的 **15 个检查器**，用于校验任务文档、分支隔离、提交信息、文档健康度等。
+**作用**：集中了方法论要求的 **16 个检查器**，用于校验任务文档、分支隔离、提交信息、文档健康度等。
 
 #### 全局常量
 
@@ -145,7 +145,7 @@
 - 属性：`has_fail` / `has_warn` / `exit_code()`（0=通过,1=警告,2=阻断）。
 - 输出：`flush_text()` / `flush_json()` / `flush_artifact()`（Markdown 报告）/ `flush()`。
 
-#### 15 个检查器（模块的"大脑"）
+#### 16 个检查器（模块的"大脑"）
 
 | # | 函数 | 校验内容 |
 |---|---|---|
@@ -165,6 +165,7 @@
 | 13 | `check_review_complete` | L2/L3 必须写入 2.1/4.1 盲审报告 |
 | 14 | `check_model_metadata` | 任务元数据"使用模型"非占位符 |
 | 15 | `check_execution_channel_records` | L1+ 已到达阶段必须记录角色契约/执行通道/偏离 |
+| 16 | `check_unit_tests` | `--all` 场景以子进程真实执行单测套件（TD-3：失败/超时即阻断；无 tests 目录则跳过） |
 
 #### 主入口 `main()`
 
