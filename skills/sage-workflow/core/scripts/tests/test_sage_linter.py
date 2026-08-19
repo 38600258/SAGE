@@ -93,5 +93,80 @@ class CheckEvidenceCompletePhaseTests(unittest.TestCase):
         self.assertTrue(ok)
 
 
+# 构造注入用临时测试源码：通过 / 失败 / 慢（超时实证）三种输入
+PASSING_TEST_SOURCE = (
+    "import unittest\n"
+    "class TestInjectedOk(unittest.TestCase):\n"
+    "    def test_ok(self):\n"
+    "        self.assertTrue(True)\n"
+)
+
+FAILING_TEST_SOURCE = (
+    "import unittest\n"
+    "class TestInjectedBad(unittest.TestCase):\n"
+    "    def test_bad(self):\n"
+    "        self.fail('intentional failure for check_unit_tests')\n"
+)
+
+SLOW_TEST_SOURCE = (
+    "import time\n"
+    "import unittest\n"
+    "class TestInjectedSlow(unittest.TestCase):\n"
+    "    def test_slow(self):\n"
+    "        time.sleep(5)\n"
+)
+
+
+class CheckUnitTestsStateTests(unittest.TestCase):
+    """check_unit_tests 三态 + 超时分支。
+
+    契约（TASK T-012 步骤 2）：仅做函数级注入调用（tests_dir 指向临时目录），
+    禁止在用例内触发 --all 全量路径，防止递归门禁。
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.linter = load_linter()
+        self.tests_dir = Path(self.temp_dir.name) / "tests"
+        self.tests_dir.mkdir()
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+        sys.modules.pop("sage_linter_under_test", None)
+
+    def write_test_file(self, source: str) -> Path:
+        target = self.tests_dir / "test_injected.py"
+        target.write_text(source, encoding="utf-8")
+        return target
+
+    def test_passing_suite_passes(self) -> None:
+        self.write_test_file(PASSING_TEST_SOURCE)
+        ok, msg = self.linter.check_unit_tests(tests_dir=self.tests_dir)
+        self.assertTrue(ok, msg)
+        self.assertIn("通过", msg)
+
+    def test_failing_suite_blocks(self) -> None:
+        self.write_test_file(FAILING_TEST_SOURCE)
+        ok, msg = self.linter.check_unit_tests(tests_dir=self.tests_dir)
+        self.assertFalse(ok)
+        self.assertIn("失败", msg)
+
+    def test_empty_tests_dir_skips(self) -> None:
+        ok, msg = self.linter.check_unit_tests(tests_dir=self.tests_dir)
+        self.assertTrue(ok)
+        self.assertIn("跳过", msg)
+
+    def test_missing_tests_dir_skips(self) -> None:
+        ok, msg = self.linter.check_unit_tests(tests_dir=self.tests_dir / "nonexistent")
+        self.assertTrue(ok)
+        self.assertIn("跳过", msg)
+
+    def test_timeout_treated_as_failure(self) -> None:
+        self.write_test_file(SLOW_TEST_SOURCE)
+        ok, msg = self.linter.check_unit_tests(tests_dir=self.tests_dir, timeout=1)
+        self.assertFalse(ok)
+        self.assertIn("超时", msg)
+
+
 if __name__ == "__main__":
     unittest.main()

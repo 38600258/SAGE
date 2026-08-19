@@ -4,6 +4,13 @@
 > 注：历史条目原本只记录日期，迁移到单行标题格式时用 `00:00:00` 作为回溯补齐时间。
 
 
+## [1.3.0] ✨ Feature 质量门禁新增单测执行项与流程规范沉淀 (T-012) - 2026-08-19 08:27:25
+- TD-3 落地（T-011 复盘最优先项）：sage_linter.py 新增第 16 个检查器 `check_unit_tests`，`--all` 从纯静态扫描升级为「静态扫描 + 真实执行」双保险——以 `sys.executable -m unittest discover` 子进程执行 linter 同级 `tests/` 套件，测试失败或超时（默认 600 秒，可注入）即阻断退出码 2；tests 目录缺失或无 `test_*.py` 时跳过提示（bootstrap 项目合法布局，非阻断）。tests_dir/timeout 可注入参数化，配套三态 + 超时共 5 例单测（31/31 全绿），关闭 4fac1b7 式断言失配潜伏主干的门禁盲区。代码盲审独立复核：必败探针实证 [16/16] 阻断退出码 2、31/31 复跑、/16 口径 grep 零残留。
+- 编号口径全量同步 `/15` → `/16`：sage_linter.py 内 15 处 `[X/15]` 输出标签与 docstring/注释 3 处"15 个检查器"表述、CODE_WIKI.md 3 处数量表述与 4.1 检查器清单（补第 16 项）；1-15 顺序与 `--check-task`（场景 A）行为不变，methodology 编号引用保持有效。
+- 流程规范沉淀（T-011 复盘问题 2/3/4）：TASK-TEMPLATE 效能数据"返工次数"行追加口径注释（盲审退回、门禁未过重跑、格式试错每轮计 1，含微返工，随模板物理复制传播）；task-document-standards 第二节新增"先例优先"与"改码前先登记"两条硬约束；KNOWN_PATTERNS 新增 BP-014（先例优先）/AP-006（静态门禁盲区）/AP-007（改码前登记）三条原子条目。
+- 已知限制（技术债，语义安全）：bootstrap 复制清单仅含 sage_linter.py 与 sage_dispatch.py、不含 `scripts/tests/`（dry-run 实证），bootstrap 后项目该检查器恒为跳过——后续任务评估是否将 tests/ 纳入复制清单。
+- 效能对照：T-012 全程零返工（init 门禁一次通过、计划盲审首审 WARN、coder Red-Green 重试 0、代码盲审首审 WARN），对比 T-011（计划盲审 BLOCK 一轮返工 + 微返工 ≥6 次）——先例优先/批量授权/预置预期结论三项复盘改进的直接验证。
+
 ## [1.2.0] ✨ Feature 适配器化子代理生成与 linter 阶段感知 (T-011) - 2026-08-19 06:39:16
 - 适配器化子代理生成（provision 下沉到各 IDE 适配器）：适配器目录从平铺 `adapters/*.json|md` 改为整目录 `adapters/<id>/`（cli/codex/generic-tool 迁移 + 新增 claude-code）；生成逻辑（`build_toml_agent`/`build_markdown_agent`/`ROLE_INSTRUCTIONS`）逐字迁入各自 `provision.py`，双入口可用（独立 argparse + `dispatch_phase.py provision --adapter <id>` 委托，项目本地优先、退出码透传）；主入口删除 `--method`/`PROVISIONING_METHODS`/`provision_agents`，新增 `--adapter` 必填，`--model-provider` 保留主入口并仅对 codex 委托透传（非 codex 拒绝退出码 2）；`profile_candidates` 两侧路径联动改子目录结构；bootstrap 复制计划改整目录（含 provision.py）。
 - 修复 sage_linter.py `check_evidence_complete` 阶段感知缺陷：按 TASK 元数据 `当前阶段` 判定，仅 code-review/close 强制校验 3.2 证据链，init/plan-review/dev 期跳过并提示；元数据缺失或未知阶段维持强制（fail-safe）。此前 init 期对模板默认未勾选的证据链误报阻断，提前勾选反而属于伪造证据。
