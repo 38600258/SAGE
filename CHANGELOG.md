@@ -4,6 +4,13 @@
 > 注：历史条目原本只记录日期，迁移到单行标题格式时用 `00:00:00` 作为回溯补齐时间。
 
 
+## [1.4.0] 🛠️ Fix 清偿遗留技术债 TD-2/TD-4/TD-6 (T-013) - 2026-08-19 09:15:50
+- TD-2 provision 报错语义区分：`locate_provision_script` 在候选 provision.py 全缺失时先经 `profile_candidates` 探测 adapter JSON——均无 JSON 报「找不到 adapter '<id>'（请检查适配器 id 拼写；若运行在独立环境请确认 skill 已挂载或指定 --repo-root）」，有 JSON 无 provision 报「adapter '<id>' 不提供子代理生成」；删除「cli/generic-tool 无原生 subagent 注册能力」误导后缀（对 claude-code 等有 subagent 能力、仅定位失败的场景构成误导）。新增未知 adapter 用例 + 既有用例断言更新（stderr 独立验证：`--adapter nope`/`--adapter cli` 两种语义各得其所）。
+- TD-4 bootstrap 构建产物过滤：`bootstrap_sage.py` 新增模块级 `_is_build_artifact(path)`（任一父目录名 `__pycache__` 或后缀 `.pyc`/`.pyo`），应用于 build_plan 两处 rglob（core 六目录 + adapters 整目录）的 is_file 分支，集中式单一实现保证过滤口径一致（避免 T-001 式两处漂移）；dry-run 实证输出零 `__pycache__`/`.pyc`/`.pyo` 匹配。
+- TD-6 bootstrap tests 透传（关闭 T-012 登记「check_unit_tests 恒跳过」盲区）：复制清单追加 `scripts/tests/test_sage_linter.py` + `__init__.py`（复用现有 copy/transform=None 框架）；不透传 `test_dispatch_phase.py`（经 `discover_skill_root` 查找 skill 内置 adapters，bootstrap 项目无 SKILL.md 布局必然 FAIL）。实际 bootstrap 到临时空 git repo 实证：`sage_linter.py --all` 输出 `🟢 [16/16] 单元测试执行: 单元测试执行通过（Ran 10 tests）`，单测门禁在 bootstrap 项目真实生效（此前恒为跳过提示）。
+- 测试与文档同步：新建 `tests/test_bootstrap_sage_build_plan.py`（monkeypatch CORE_ROOT/SKILL_ROOT 到临时目录，覆盖 TD-4 过滤/TD-6 透传名单/既有脚本复制不回归 3 用例；断言用 as_posix 归一化保证平台无关）；全量单测 35/35 绿（31 + 新增 4）。CODE_WIKI.md 同步四处：3.1 代码资产表补 tests 两行、模块间关系 bootstrap 复制清单、新增 4.5 节、5.4 模块依赖图。
+- 硬约束沉淀：`test_sage_linter.py` 是 TD-6 唯一透传资产，严禁注入任何 `bootstrap_sage`/repository 级依赖（污染将导致 bootstrap 项目 check_unit_tests 恒阻断）；build_plan 用例必须放独立文件承载。
+
 ## [1.3.0] ✨ Feature 质量门禁新增单测执行项与流程规范沉淀 (T-012) - 2026-08-19 08:27:25
 - TD-3 落地（T-011 复盘最优先项）：sage_linter.py 新增第 16 个检查器 `check_unit_tests`，`--all` 从纯静态扫描升级为「静态扫描 + 真实执行」双保险——以 `sys.executable -m unittest discover` 子进程执行 linter 同级 `tests/` 套件，测试失败或超时（默认 600 秒，可注入）即阻断退出码 2；tests 目录缺失或无 `test_*.py` 时跳过提示（bootstrap 项目合法布局，非阻断）。tests_dir/timeout 可注入参数化，配套三态 + 超时共 5 例单测（31/31 全绿），关闭 4fac1b7 式断言失配潜伏主干的门禁盲区。代码盲审独立复核：必败探针实证 [16/16] 阻断退出码 2、31/31 复跑、/16 口径 grep 零残留。
 - 编号口径全量同步 `/15` → `/16`：sage_linter.py 内 15 处 `[X/15]` 输出标签与 docstring/注释 3 处"15 个检查器"表述、CODE_WIKI.md 3 处数量表述与 4.1 检查器清单（补第 16 项）；1-15 顺序与 `--check-task`（场景 A）行为不变，methodology 编号引用保持有效。

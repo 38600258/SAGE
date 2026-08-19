@@ -520,6 +520,20 @@ task.write_text(content, encoding='utf-8')
                     expected=2,
                 )
                 self.assertIn("不提供子代理生成", completed.stderr)
+                # TD-2：语义修正后不得再混入 "cli/generic-tool" 误导后缀
+                self.assertNotIn("cli/generic-tool 无原生", completed.stderr)
+
+    def test_provision_rejects_unknown_adapter(self) -> None:
+        completed = self.dispatch(
+            "provision",
+            "--adapter",
+            "nope",
+            "--target-dir",
+            str(Path(self.temp_dir.name) / "nope-agents"),
+            expected=2,
+        )
+        # TD-2：未知 adapter 报"找不到 adapter"（含排查提示），而非误报"不提供子代理生成"
+        self.assertIn("找不到 adapter", completed.stderr)
 
     def test_provision_prefers_local_adapter_script(self) -> None:
         local_dir = self.repo_root / "docs" / "guides" / "execution-adapters" / "codex"
