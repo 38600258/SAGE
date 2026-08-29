@@ -4,6 +4,11 @@
 > 注：历史条目原本只记录日期，迁移到单行标题格式时用 `00:00:00` 作为回溯补齐时间。
 
 
+## [1.5.1] 🐛 BugFix 清偿遗留技术债 TD-7/TD-8：模板执行通道失效路径与盲审校验 HTML 注释误放行 (T-015) - 2026-08-29 22:44:27
+- TD-7 模板失效路径修复（双语境同构）：`TASK-TEMPLATE.md` 执行通道配置默认值从 `docs/guides/execution-channels.md`（本仓库不存在该目录，T-013 起每份 TASK 元数据沿用失效路径）改为 skill 源仓库权威路径 `skills/sage-workflow/core/guides/execution-channels.md`；`bootstrap_sage.py` 新增 `render_template(content)` 转换（`skills/sage-workflow/core/guides/` → `docs/guides/`，与 `render_entry`「源为 skill 语境、复制时转换为目标项目语境」同构），`build_plan` templates 条目携带 `template` 转换、`main()` 新增对应写出分支。临时空仓库真实 bootstrap 实证：落盘模板 L15 已重写、目标项目 `docs/guides/execution-channels.md` 真实存在。
+- TD-8 盲审完整性校验修复（含阶段感知伴生修改）：`sage_linter.py` 新增 `_strip_html_comments`（DOTALL 非贪婪，含跨行注释），`check_review_complete` 判定前统一剥离 HTML 注释——模板 2.1/4.1 节内置门禁注释含 OK/WARN/BLOCK 字样，此前既命中结论标记词表、注释行又计为实质内容，空章节恒放行、盲审门禁形同虚设。同函数补阶段感知（T-011 为 `check_evidence_complete` 建立的同构模式）：`init` 阶段两节均未到期跳过，`plan-review`/`dev` 仅 2.1 计划评审报告到期（4.1 未到期在通过消息中提示），`code-review`/`close` 两节均到期，元数据缺失或未知阶段维持强制（fail-safe）——此前早期阶段的空节靠本缺陷恒放行，修复后必须补阶段感知，否则所有后续任务 init/dev 期门禁误报阻断。三态诊断结构、判定词表与披露文案零改动（T-014「判定语义与披露内容严格分离」原则延续）；`dispatch_phase.py` verify 经核查用严格格式正则 `审查结果[：:] OK|WARN|BLOCK`，无同源缺陷，不纳入本次范围。
+- 测试与文档同步：`test_sage_linter.py` 新增 7 例（TD-8 三态回归 3 例——模板原样空 2.1 节 FAIL、跨行 HTML 注释 DOTALL 分支 FAIL、真实报告与注释共存 PASS 防误伤；阶段感知 4 例——init 跳过/dev 仅 2.1 到期/code-review 双节到期/元数据缺失 fail-safe）；`test_bootstrap_sage_build_plan.py` 新增 2 例（render_template 路径重写、templates 条目转换标记）；全量单测 53 → 62 例全绿。CODE_WIKI.md 同步四处（检查器清单 13 行、4.3 资产表 +render_template 行与复制计划转换标注、bootstrap 语境备案注、4.5 测试覆盖清单）。
+
 ## [1.5.0] ✨ Feature 质量门禁自解释改造：规则 ID 全量标注、命中依据披露与拦截频率日志 (T-014) - 2026-08-29 14:47:42
 - 规则 ID 中心化标注（SAGE-01~17）：`ResultCollector.add` 经 `_rule_id_from_label` 从检查器标签编号派生稳定规则 ID（兼容 `[N/16]` 与 `N.` 两种形态，不可解析时降级省略），fail/warn 在 text/json/artifact 三格式统一携带（json 为独立 `rule_id` 字段）；16 个检查器函数签名与判定语义零改动。
 - 4 个启发式黑盒检查器命中依据披露（仅披露，判定语义与词表内容不变）：`check_task_risk_sections` AC 表逐单元格报告空列/命中占位词并附判定词表全量、风险矩阵区分表格缺失与数据行占位两类情形；`check_review_complete` 三态诊断（章节不存在/无审查结论标记/有标记但仅占位文本）并列出对应词表；`check_execution_channel_records` 披露要求的标题格式与 `- [x] **标签**: 内容` 行格式；`check_model_metadata` 按类别披露占位符命中。

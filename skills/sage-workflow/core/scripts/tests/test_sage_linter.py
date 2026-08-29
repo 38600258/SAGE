@@ -316,6 +316,148 @@ class RuleIdAndDisclosureTests(unittest.TestCase):
         self.assertIn("存在审查标记但无实质内容", msg)
         self.assertIn("占位词表", msg)
 
+    # ---------- TD-8 回归：模板 HTML 门禁注释不得参与盲审判定 ----------
+
+    def test_review_section_template_html_comments_not_counted(self) -> None:
+        # 模板原样空 2.1 节：HTML 门禁注释含 OK/WARN/BLOCK，修复前会被误计为结论标记与实质内容而恒放行；
+        # 4.1 提供真实报告以隔离断言目标
+        task = self.write_task(
+            "# TASK\n\n- **风险等级**: L2\n\n"
+            "### 2.1 评审意见 (Review Feedback)\n\n"
+            "- [ ] **评审意见**: (由 reviewer 填写)\n"
+            "- [ ] **修正记录**: (如有修改)\n\n"
+            "<!-- 盲审按“执行通道配置”调用 CLI 或 subagent；Prompt 只提供 REPO_ROOT、TASK_PATH、ROLE_PROMPT、PHASE 等必要定位信息，其他调度信息从 TASK 元数据读取，并要求 reviewer 写回本节。 -->\n"
+            "<!-- 门禁：若本节未出现 OK/WARN/BLOCK 等有效审查报告，流程不得进入阶段 3。 -->\n\n"
+            "## 💻 阶段 3：开发与验证\n\n"
+            "### 4.1 代码评审 (Code Review Feedback)\n\n"
+            "### 审查结果：OK\n\n"
+            "逐维度评定全部通过。\n\n"
+            "## 🧠 阶段 5：收尾与归档\n"
+        )
+        ok, msg = self.linter.check_review_complete(task)
+        self.assertFalse(ok)
+        self.assertIn("2.1 计划评审报告", msg)
+        self.assertIn("未找到审查结论标记", msg)
+
+    def test_review_section_multiline_html_comment_not_counted(self) -> None:
+        # 跨行 HTML 注释（<!-- 与 --> 分行）同样不得参与判定，覆盖 DOTALL 剥离分支；
+        # 2.1 提供真实报告以隔离断言目标
+        task = self.write_task(
+            "# TASK\n\n- **风险等级**: L2\n\n"
+            "### 2.1 评审意见 (Review Feedback)\n\n"
+            "### 审查结果：OK\n\n"
+            "逐维度评定全部通过。\n\n"
+            "## 💻 阶段 3：开发与验证\n\n"
+            "### 4.1 代码评审 (Code Review Feedback)\n\n"
+            "- [ ] **核心变更点**:\n"
+            "<!-- 多行门禁说明：\n"
+            "    结论词 OK WARN BLOCK 出现在注释内部\n"
+            "-->\n\n"
+            "## 🧠 阶段 5：收尾与归档\n"
+        )
+        ok, msg = self.linter.check_review_complete(task)
+        self.assertFalse(ok)
+        self.assertIn("4.1 代码评审报告", msg)
+        self.assertIn("未找到审查结论标记", msg)
+
+    def test_review_section_real_report_with_html_comments_passes(self) -> None:
+        # 防误伤：真实审查报告与 HTML 门禁注释共存时必须放行（2.1/4.1 对称覆盖）
+        task = self.write_task(
+            "# TASK\n\n- **风险等级**: L2\n\n"
+            "### 2.1 评审意见 (Review Feedback)\n\n"
+            "### 审查结果：OK\n\n"
+            "逐维度评定全部通过，计划可证伪且范围锁定完整。\n\n"
+            "<!-- 门禁：若本节未出现 OK/WARN/BLOCK 等有效审查报告，流程不得进入阶段 3。 -->\n\n"
+            "## 💻 阶段 3：开发与验证\n\n"
+            "### 4.1 代码评审 (Code Review Feedback)\n\n"
+            "### 审查结果：WARN\n\n"
+            "存在轻微改进建议，无阻塞项。\n\n"
+            "<!-- 门禁：若本节未出现 OK/WARN/BLOCK 等有效审查报告，流程不得进入阶段 5。 -->\n\n"
+            "## 🧠 阶段 5：收尾与归档\n"
+        )
+        ok, msg = self.linter.check_review_complete(task)
+        self.assertTrue(ok, msg)
+
+    # ---------- 阶段感知：盲审报告按阶段到期（与 check_evidence_complete 同构） ----------
+
+    def test_review_stage_init_skips_both_sections(self) -> None:
+        # init 阶段两节均未到期：空节（含模板门禁注释）不阻断
+        task = self.write_task(
+            "# TASK\n\n- **风险等级**: L2\n- **当前阶段**: init\n\n"
+            "### 2.1 评审意见 (Review Feedback)\n\n"
+            "<!-- 门禁注释：OK/WARN/BLOCK -->\n\n"
+            "## 💻 阶段 3：开发与验证\n\n"
+            "### 4.1 代码评审 (Code Review Feedback)\n\n"
+            "<!-- 门禁注释：OK/WARN/BLOCK -->\n\n"
+            "## 🧠 阶段 5：收尾与归档\n"
+        )
+        ok, msg = self.linter.check_review_complete(task)
+        self.assertTrue(ok, msg)
+        self.assertIn("未到期", msg)
+
+    def test_review_stage_dev_defers_code_review_only(self) -> None:
+        # dev 阶段：2.1 已到期、4.1 未到期——4.1 空节放行，2.1 空节仍阻断
+        due_plan = self.write_task(
+            "# TASK\n\n- **风险等级**: L2\n- **当前阶段**: dev\n\n"
+            "### 2.1 评审意见 (Review Feedback)\n\n"
+            "### 审查结果：OK\n\n"
+            "计划评审通过。\n\n"
+            "## 💻 阶段 3：开发与验证\n\n"
+            "### 4.1 代码评审 (Code Review Feedback)\n\n"
+            "<!-- 门禁注释：OK/WARN/BLOCK -->\n\n"
+            "## 🧠 阶段 5：收尾与归档\n"
+        )
+        ok, msg = self.linter.check_review_complete(due_plan)
+        self.assertTrue(ok, msg)
+        self.assertIn("4.1", msg)
+        self.assertIn("未到期", msg)
+
+        due_code = self.write_task(
+            "# TASK\n\n- **风险等级**: L2\n- **当前阶段**: dev\n\n"
+            "### 2.1 评审意见 (Review Feedback)\n\n"
+            "<!-- 门禁注释：OK/WARN/BLOCK -->\n\n"
+            "## 💻 阶段 3：开发与验证\n\n"
+            "### 4.1 代码评审 (Code Review Feedback)\n\n"
+            "### 审查结果：OK\n\n"
+            "代码评审通过。\n\n"
+            "## 🧠 阶段 5：收尾与归档\n"
+        )
+        ok, msg = self.linter.check_review_complete(due_code)
+        self.assertFalse(ok)
+        self.assertIn("2.1 计划评审报告", msg)
+
+    def test_review_stage_code_review_enforces_both(self) -> None:
+        # code-review 阶段两节均到期：双空节均列入阻断
+        task = self.write_task(
+            "# TASK\n\n- **风险等级**: L2\n- **当前阶段**: code-review\n\n"
+            "### 2.1 评审意见 (Review Feedback)\n\n"
+            "<!-- 门禁注释：OK/WARN/BLOCK -->\n\n"
+            "## 💻 阶段 3：开发与验证\n\n"
+            "### 4.1 代码评审 (Code Review Feedback)\n\n"
+            "<!-- 门禁注释：OK/WARN/BLOCK -->\n\n"
+            "## 🧠 阶段 5：收尾与归档\n"
+        )
+        ok, msg = self.linter.check_review_complete(task)
+        self.assertFalse(ok)
+        self.assertIn("2.1 计划评审报告", msg)
+        self.assertIn("4.1 代码评审报告", msg)
+
+    def test_review_stage_missing_metadata_enforces_both(self) -> None:
+        # 元数据缺失维持强制（fail-safe）：无当前阶段行时空节仍阻断
+        task = self.write_task(
+            "# TASK\n\n- **风险等级**: L2\n\n"
+            "### 2.1 评审意见 (Review Feedback)\n\n"
+            "<!-- 门禁注释：OK/WARN/BLOCK -->\n\n"
+            "## 💻 阶段 3：开发与验证\n\n"
+            "### 4.1 代码评审 (Code Review Feedback)\n\n"
+            "<!-- 门禁注释：OK/WARN/BLOCK -->\n\n"
+            "## 🧠 阶段 5：收尾与归档\n"
+        )
+        ok, msg = self.linter.check_review_complete(task)
+        self.assertFalse(ok)
+        self.assertIn("2.1 计划评审报告", msg)
+        self.assertIn("4.1 代码评审报告", msg)
+
     # ---------- 执行通道记录格式披露 ----------
 
     def test_execution_channel_missing_section_disclosure(self) -> None:

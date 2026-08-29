@@ -104,6 +104,32 @@ class BuildPlanTests(unittest.TestCase):
         self.assertTrue(self._target_has(targets, "scripts/sage_linter.py"))
         self.assertTrue(self._target_has(targets, "scripts/sage_dispatch.py"))
 
+    def test_template_transform_marker(self) -> None:
+        # TD-7：templates 复制条目必须携带 "template" 转换（执行通道配置路径重写由 render_template 承载）
+        (self.core_root / "templates" / "TASK-TEMPLATE.md").write_text(
+            "- **执行通道配置**: skills/sage-workflow/core/guides/execution-channels.md\n",
+            encoding="utf-8",
+        )
+        plan = self.mod.build_plan(self.repo_root)
+        template_entries = [
+            transform
+            for source, _, transform in plan
+            if Path(source).as_posix().endswith("/templates/TASK-TEMPLATE.md")
+        ]
+        self.assertEqual(template_entries, ["template"])
+
+    def test_render_template_rewrites_core_guides_path(self) -> None:
+        # TD-7：skill 仓库语境的权威 guides 路径在 bootstrap 目标项目中重写为 docs/guides/
+        content = (
+            "# 任务模板\n"
+            "- **执行通道配置**: skills/sage-workflow/core/guides/execution-channels.md\n"
+        )
+        rendered = self.mod.render_template(content)
+        self.assertIn("docs/guides/execution-channels.md", rendered)
+        self.assertNotIn("skills/sage-workflow/core/guides/", rendered)
+        # 无关内容不受影响
+        self.assertIn("# 任务模板", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

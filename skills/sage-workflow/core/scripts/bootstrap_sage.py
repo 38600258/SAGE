@@ -40,6 +40,12 @@ def render_project_guide(content: str) -> str:
     return content.replace("../entry/AGENTS.md", "../../AGENTS.md")
 
 
+def render_template(content: str) -> str:
+    """目标项目语境转换（TD-7）：模板默认值为 skill 仓库权威路径，bootstrap 后项目本地无
+    skills/sage-workflow/ 布局，执行通道配置重写为 docs/guides/（guides 目录的目标落地位置）。"""
+    return content.replace("skills/sage-workflow/core/guides/", "docs/guides/")
+
+
 def _is_build_artifact(path: Path) -> bool:
     """判断路径是否为 Python 构建产物（TD-4）：任一父目录名 '__pycache__' 或文件后缀 .pyc/.pyo。
 
@@ -65,6 +71,8 @@ def build_plan(repo_root: Path) -> list[tuple[Path, Path, str | None]]:
                 transform = None
                 if source == CORE_ROOT / "guides":
                     transform = "guide"
+                elif source == CORE_ROOT / "templates":
+                    transform = "template"
                 plan.append((source_file, target_file, transform))
 
     # 适配器整目录复制（<id>/<id>.json + <id>.md + provision.py 等），保持子目录结构不变，
@@ -169,6 +177,8 @@ def main() -> int:
             target.write_text(render_entry(source.read_text(encoding="utf-8")), encoding="utf-8", newline="")
         elif transform == "guide":
             target.write_text(render_project_guide(source.read_text(encoding="utf-8")), encoding="utf-8", newline="")
+        elif transform == "template":
+            target.write_text(render_template(source.read_text(encoding="utf-8")), encoding="utf-8", newline="")
         else:
             copy2(source, target)
         copied += 1

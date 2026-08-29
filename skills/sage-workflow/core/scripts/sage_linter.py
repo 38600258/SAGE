@@ -904,6 +904,12 @@ def check_evidence_complete(task_file):
 
     return True, "证据链完整性校验通过 (自动化测试与 Lint 证据已勾选确认)"
 
+def _strip_html_comments(content: str) -> str:
+    """剥离 Markdown 中的 HTML 注释（含跨行，TD-8）：模板 2.1/4.1 节内置的门禁注释含
+    OK/WARN/BLOCK 字样，不剥离会被 check_review_complete 误计为审查结论标记与实质内容，
+    空章节恒放行。剥离仅用于判定输入，不改变原文件。"""
+    return re.sub(r"<!--.*?-->", "", content, flags=re.DOTALL)
+
 def check_review_complete(task_file):
     """13. 盲审结果完整性: L2/L3 任务必须写入计划评审与代码评审报告"""
     task_path = Path(task_file)
@@ -911,6 +917,8 @@ def check_review_complete(task_file):
         return False, f"任务文档不存在: {task_file}"
 
     content = "".join(get_file_lines(task_path))
+    # TD-8：HTML 门禁注释不参与结论标记与实质内容判定，剥离后再做章节定位与三态诊断
+    content = _strip_html_comments(content)
 
     risk_match = re.search(r'-\s*\*\*风险等级\*\*:\s*(L1|L2|L3)', content)
     if not risk_match:
@@ -919,6 +927,15 @@ def check_review_complete(task_file):
 
     if risk_level == "L1":
         return True, "L1 任务可跳过阶段二/四盲审，跳过盲审完整性校验。"
+
+    # 阶段感知（T-015）：计划评审报告到 plan-review 才到期，代码评审报告到 code-review 才到期；
+    # 早期阶段模板空节未填属预期，提前强制会误报阻断。元数据缺失或未知阶段维持强制（fail-safe），
+    # 与 check_evidence_complete 的阶段感知设计一致。
+    stage_match = re.search(r'-\s*\*\*当前阶段\*\*:\s*([a-z-]+)', content)
+    current_stage = stage_match.group(1).strip() if stage_match else ""
+    if current_stage == "init":
+        return True, "💡 提示：当前阶段为 init，2.1/4.1 盲审报告均未到期，跳过校验。"
+    code_due = current_stage not in ("plan-review", "dev")
 
     def section_between(start_markers, end_markers):
         start = -1
@@ -982,9 +999,10 @@ def check_review_complete(task_file):
     plan_reason = diagnose_review_section(plan_section)
     if plan_reason:
         problems.append(f"2.1 计划评审报告：{plan_reason}")
-    code_reason = diagnose_review_section(code_section)
-    if code_reason:
-        problems.append(f"4.1 代码评审报告：{code_reason}")
+    if code_due:
+        code_reason = diagnose_review_section(code_section)
+        if code_reason:
+            problems.append(f"4.1 代码评审报告：{code_reason}")
 
     if problems:
         return False, (
@@ -992,6 +1010,12 @@ def check_review_complete(task_file):
             + "\n  - ".join(problems)
             + "\n调用 agy 后必须确认 TASK 文档对应章节已写入 OK/WARN/BLOCK 等 Markdown 审查结果，"
             + "否则不得继续流转。"
+        )
+
+    if not code_due:
+        return True, (
+            f"盲审结果完整性校验通过 (风险等级: {risk_level}；当前阶段 {current_stage}，"
+            f"4.1 代码评审报告未到期跳过)"
         )
 
     return True, f"盲审结果完整性校验通过 (风险等级: {risk_level})"
