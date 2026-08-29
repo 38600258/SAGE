@@ -12,7 +12,7 @@
 - **当前阶段**: init | plan-review | dev | code-review | close
 - **项目根目录**: (绝对路径，如 D:\Dev\Code\your-project)
 - **功能分支**: (分支名，如 feat/t-001-add-auth 或 docs/t-001-update-docs)
-- **执行通道配置**: docs/guides/execution-channels.md
+- **执行通道配置**: skills/sage-workflow/core/guides/execution-channels.md
 - **使用模型**: [填写实际使用的模型]
 - **工具会话 ID**: [自动填写，如 Antigravity 会话 ID / Codex thread]
 - **效能数据**:

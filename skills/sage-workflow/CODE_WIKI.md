@@ -167,7 +167,7 @@
 | 10 | `check_scope_lock` | 实际改动文件落在 TASK 1.4 Writeable 白名单 |
 | 11 | `check_cross_links` | 本地 md 相对链接有效 |
 | 12 | `check_evidence_complete` | 3.2 证据链的测试/Lint 已勾选 |
-| 13 | `check_review_complete` | L2/L3 必须写入 2.1/4.1 盲审报告 |
+| 13 | `check_review_complete` | L2/L3 必须写入 2.1/4.1 盲审报告（判定前剥离 HTML 注释——TD-8：模板门禁注释含 OK/WARN/BLOCK，不剥离则空章节恒放行） |
 | 14 | `check_model_metadata` | 任务元数据"使用模型"非占位符 |
 | 15 | `check_execution_channel_records` | L1+ 已到达阶段必须记录角色契约/执行通道/偏离 |
 | 16 | `check_unit_tests` | `--all` 场景以子进程真实执行单测套件（TD-3：失败/超时即阻断；无 tests 目录则跳过） |
@@ -269,7 +269,10 @@
 | `CORE_ROOT` / `SKILL_ROOT` | 基于 `__file__` 解析 skill 目录 |
 | `render_entry(content)` | 重写入口文件中的相对路径（`../guides/`→`docs/guides/` 等） |
 | `render_project_guide(content)` | 重写指南入口链接 |
-| `build_plan(repo_root)` | 生成「源→目标」复制计划：prompts/templates/guides/methodology/scaffold/githooks/adapters/脚本/入口 |
+| `render_template(content)` | 重写模板中的 skill 仓库权威路径（`skills/sage-workflow/core/guides/`→`docs/guides/`，TD-7：模板默认值在 skill 源仓库与 bootstrap 项目双语境均有效） |
+| `build_plan(repo_root)` | 生成「源→目标」复制计划：prompts/templates/guides/methodology/scaffold/githooks/adapters/脚本/入口（templates 条目携带 `template` 转换、guides 携带 `guide` 转换、入口携带 `entry` 转换，其余原样复制） |
+
+> 注（T-015 计划盲审备案）：本仓库（skill 源仓库）entry/methodology 中出现的 `docs/guides/` 引用属 bootstrap 目标语境设计或禁改范围，非路径失效；skill 源仓库自身以 `skills/sage-workflow/core/guides/` 为权威路径（TD-7 修复口径）。
 | `configure_hooks(repo_root, dry_run)` | 检查并（缺省时）设置 `git config core.hooksPath=.githooks`，不覆盖已有配置 |
 | `main()` | 执行复制（尊重 `--force`/`--dry-run`/`--skip-hooks`） |
 
@@ -291,6 +294,7 @@
 基于 `unittest`，以独立模块名加载 `bootstrap_sage.py` 并 monkeypatch `CORE_ROOT`/`SKILL_ROOT` 到临时目录，覆盖：
 - TD-4 构建产物过滤：`__pycache__`/`.pyc` 排除在复制计划外
 - TD-6 tests 透传名单：含 `test_sage_linter.py` + `__init__.py`，不含 `test_dispatch_phase.py`
+- TD-7 模板路径转换：`render_template` 重写 `skills/sage-workflow/core/guides/` → `docs/guides/`；templates 复制条目携带 `template` 转换标记
 - 既有脚本复制不回归（`sage_linter.py` / `sage_dispatch.py`）
 
 > 注：`test_sage_linter.py` 是 bootstrap 唯一透传的测试资产，严禁注入 `bootstrap_sage`/repository 级依赖。
