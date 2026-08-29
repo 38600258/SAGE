@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -166,6 +169,244 @@ class CheckUnitTestsStateTests(unittest.TestCase):
         ok, msg = self.linter.check_unit_tests(tests_dir=self.tests_dir, timeout=1)
         self.assertFalse(ok)
         self.assertIn("超时", msg)
+
+
+class RuleIdAndDisclosureTests(unittest.TestCase):
+    """规则 ID 中心化标注、启发式检查器命中依据披露、运行日志三态（T-014）。"""
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.linter = load_linter()
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+        sys.modules.pop("sage_linter_under_test", None)
+
+    def write_task(self, content: str) -> Path:
+        task = Path(self.temp_dir.name) / "ACTIVE_TASK_T-TEST.md"
+        task.write_text(content, encoding="utf-8")
+        return task
+
+    # ---------- 规则 ID 派生与三格式输出 ----------
+
+    def test_rule_id_from_label_formats(self) -> None:
+        self.assertEqual(self.linter._rule_id_from_label("[10/16] 范围锁定校验"), "SAGE-10")
+        self.assertEqual(self.linter._rule_id_from_label("17. 提交信息中文校验"), "SAGE-17")
+        self.assertIsNone(self.linter._rule_id_from_label("无编号标签"))
+
+    def test_collector_json_carries_rule_id(self) -> None:
+        collector = self.linter.ResultCollector(fmt="json")
+        collector.add("10. 范围锁定校验", False, "越权修改")
+        self.assertEqual(collector.results[0].rule_id, "SAGE-10")
+        self.assertIn("rule_id", collector.results[0].to_dict())
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            collector.flush()
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["results"][0]["rule_id"], "SAGE-10")
+
+    def test_text_fail_and_warn_lines_carry_rule_id(self) -> None:
+        collector = self.linter.ResultCollector(fmt="text")
+        collector.add("10. 范围锁定校验", False, "越权修改")
+        collector.add("6. 文档新鲜度扫描", True, "⚠️ 新鲜度警告")
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            collector.flush()
+        output = buffer.getvalue()
+        self.assertIn("[SAGE-10]", output)
+        self.assertIn("[SAGE-06]", output)
+
+    def test_unparseable_label_degrades_silently(self) -> None:
+        collector = self.linter.ResultCollector(fmt="text")
+        collector.add("无编号标签", False, "违规")
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            collector.flush()
+        self.assertNotIn("[SAGE-", buffer.getvalue())
+
+    # ---------- 风险扩展校验命中依据披露 ----------
+
+    def test_risk_ac_placeholder_disclosure(self) -> None:
+        task = self.write_task(
+            "# TASK\n\n"
+            "- **风险等级**: L2\n\n"
+            "### 1.3a 验收标准\n\n"
+            "| AC-ID | 类型 | 可证伪验收标准 | 验证方式 | 证据位置 |\n"
+            "|-------|------|----------------|----------|----------|\n"
+            "| AC-1 | [auto] | 运行全部单测 | 待填 | |\n\n"
+            "### 1.3b 风险矩阵\n\n"
+            "| 风险 | 概率 | 影响 | 缓解措施 |\n"
+            "|------|------|------|---------|\n"
+            "| 真实风险条目 | 低 | 低 | 真实应对方式 |\n\n"
+            "### 1.4 范围锁定\n"
+        )
+        ok, msg = self.linter.check_task_risk_sections(task)
+        self.assertFalse(ok)
+        self.assertIn('命中占位符标记 "待填"', msg)
+        self.assertIn("验证方式 列", msg)
+        self.assertIn("判定词表", msg)
+        self.assertIn("证据位置 列为空", msg)
+
+    def test_risk_matrix_placeholder_disclosure(self) -> None:
+        task = self.write_task(
+            "# TASK\n\n"
+            "- **风险等级**: L2\n\n"
+            "### 1.3a 验收标准\n\n"
+            "| AC-ID | 类型 | 可证伪验收标准 | 验证方式 | 证据位置 |\n"
+            "|-------|------|----------------|----------|----------|\n"
+            "| AC-1 | [auto] | 全部单测通过 | unittest discover | 3.2 |\n\n"
+            "### 1.3b 风险矩阵\n\n"
+            "| 风险 | 概率 | 影响 | 缓解措施 |\n"
+            "|------|------|------|---------|\n"
+            "| (风险描述) | 低/中/高 | 低/中/高 | (缓解方案) |\n\n"
+            "### 1.4 范围锁定\n"
+        )
+        ok, msg = self.linter.check_task_risk_sections(task)
+        self.assertFalse(ok)
+        self.assertIn("未填写具体内容", msg)
+        self.assertIn("命中", msg)
+        self.assertIn("判定词表", msg)
+
+    def test_risk_matrix_missing_table_disclosure(self) -> None:
+        task = self.write_task(
+            "# TASK\n\n"
+            "- **风险等级**: L2\n\n"
+            "### 1.3a 验收标准\n\n"
+            "| AC-ID | 类型 | 可证伪验收标准 | 验证方式 | 证据位置 |\n"
+            "|-------|------|----------------|----------|----------|\n"
+            "| AC-1 | [auto] | 全部单测通过 | unittest discover | 3.2 |\n\n"
+            "### 1.3b 风险矩阵\n\n"
+            "暂无内容。\n\n"
+            "### 1.4 范围锁定\n"
+        )
+        ok, msg = self.linter.check_task_risk_sections(task)
+        self.assertFalse(ok)
+        self.assertIn("缺少完整表格", msg)
+
+    # ---------- 盲审完整性三态披露 ----------
+
+    def test_review_section_missing_disclosure(self) -> None:
+        task = self.write_task("# TASK\n\n- **风险等级**: L2\n\n## 阶段 3：开发与验证\n")
+        ok, msg = self.linter.check_review_complete(task)
+        self.assertFalse(ok)
+        self.assertIn("章节不存在", msg)
+        self.assertIn("要求标题", msg)
+
+    def test_review_section_without_marker_disclosure(self) -> None:
+        task = self.write_task(
+            "# TASK\n\n- **风险等级**: L2\n\n"
+            "### 2.1 评审意见\n\n一些普通文字。\n\n"
+            "## 阶段 3：开发与验证\n"
+        )
+        ok, msg = self.linter.check_review_complete(task)
+        self.assertFalse(ok)
+        self.assertIn("未找到审查结论标记", msg)
+        self.assertIn("判定词表", msg)
+
+    def test_review_section_placeholder_only_disclosure(self) -> None:
+        task = self.write_task(
+            "# TASK\n\n- **风险等级**: L2\n\n"
+            "### 2.1 评审意见\n\n"
+            "- [ ] **评审意见**: (由 reviewer 填写)\n"
+            "评审反馈 OK\n\n"
+            "## 阶段 3：开发与验证\n"
+        )
+        ok, msg = self.linter.check_review_complete(task)
+        self.assertFalse(ok)
+        self.assertIn("存在审查标记但无实质内容", msg)
+        self.assertIn("占位词表", msg)
+
+    # ---------- 执行通道记录格式披露 ----------
+
+    def test_execution_channel_missing_section_disclosure(self) -> None:
+        task = self.write_task(
+            "# TASK\n\n"
+            "- **风险等级**: L2\n"
+            "- **当前阶段**: dev\n\n"
+            "执行通道记录\n\n"
+            "### 1.0 执行通道记录\n"
+            "- [x] **角色契约**: prompts/planner.md 已加载并遵循\n"
+            "- [x] **执行通道**: Main Agent\n"
+            "- [x] **偏离处理**: N/A\n"
+        )
+        ok, msg = self.linter.check_execution_channel_records(task)
+        self.assertFalse(ok)
+        self.assertIn("要求标题: ### 3.0 执行通道记录", msg)
+
+    def test_execution_channel_format_disclosure(self) -> None:
+        task = self.write_task(
+            "# TASK\n\n"
+            "- **风险等级**: L2\n"
+            "- **当前阶段**: dev\n\n"
+            "执行通道记录\n\n"
+            "### 1.0 执行通道记录\n"
+            "- [ ] **角色契约**: prompts/planner.md 已加载并遵循\n"
+            "- [x] **执行通道**: Main Agent\n"
+            "- [x] **偏离处理**: N/A\n\n"
+            "### 3.0 执行通道记录\n"
+            "- [x] **角色契约**: prompts/coder.md 已加载并遵循\n"
+            "- [x] **偏离处理**: N/A\n"
+        )
+        ok, msg = self.linter.check_execution_channel_records(task)
+        self.assertFalse(ok)
+        self.assertIn("复选框未勾选", msg)
+        self.assertIn("要求行格式", msg)
+
+    # ---------- 模型元数据类别披露 ----------
+
+    def test_model_metadata_paren_placeholder_disclosure(self) -> None:
+        task = self.write_task("- **使用模型**: (见模型选择指南)\n")
+        ok, msg = self.linter.check_model_metadata(task)
+        self.assertFalse(ok)
+        self.assertIn("括号占位符", msg)
+        self.assertIn("(见模型选择指南)", msg)
+
+    def test_model_metadata_keyword_disclosure(self) -> None:
+        task = self.write_task("- **使用模型**: 请填写模型名称\n")
+        ok, msg = self.linter.check_model_metadata(task)
+        self.assertFalse(ok)
+        self.assertIn('占位词"填写"', msg)
+
+    # ---------- 运行日志与 .sage/ 元文件判定 ----------
+
+    def test_write_run_log_appends_single_line(self) -> None:
+        collector = self.linter.ResultCollector(fmt="text")
+        collector.add("10. 范围锁定校验", False, "越权修改")
+        collector.add("6. 文档新鲜度扫描", True, "⚠️ 新鲜度警告")
+        root = Path(self.temp_dir.name)
+        self.linter.write_run_log(root, "all", collector, hook_mode=False)
+        log_file = root / ".sage" / "linter-runs.jsonl"
+        self.assertTrue(log_file.exists())
+        lines = log_file.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(len(lines), 1)
+        entry = json.loads(lines[0])
+        self.assertEqual(entry["mode"], "all")
+        self.assertEqual(entry["exit_code"], 2)
+        self.assertEqual(entry["fail"], ["SAGE-10"])
+        self.assertEqual(entry["warn"], ["SAGE-06"])
+        self.assertIn("ts", entry)
+
+    def test_write_run_log_hook_mode_skips_clean_runs(self) -> None:
+        root = Path(self.temp_dir.name)
+        clean = self.linter.ResultCollector(fmt="text")
+        clean.add("10. 范围锁定校验", True, "通过")
+        self.linter.write_run_log(root, "scope", clean, hook_mode=True)
+        self.assertFalse((root / ".sage" / "linter-runs.jsonl").exists())
+
+        warn_only = self.linter.ResultCollector(fmt="text")
+        warn_only.add("6. 文档新鲜度扫描", True, "⚠️ 新鲜度警告")
+        self.linter.write_run_log(root, "scope", warn_only, hook_mode=True)
+        self.assertTrue((root / ".sage" / "linter-runs.jsonl").exists())
+
+    def test_write_run_log_default_uses_module_hook_flag(self) -> None:
+        root = Path(self.temp_dir.name)
+        collector = self.linter.ResultCollector(fmt="text")
+        collector.add("10. 范围锁定校验", False, "越权修改")
+        self.linter.write_run_log(root, "all", collector)
+        self.assertTrue((root / ".sage" / "linter-runs.jsonl").exists())
+
+    def test_sage_dir_treated_as_meta_file(self) -> None:
+        self.assertTrue(self.linter._is_meta_file(".sage/linter-runs.jsonl"))
 
 
 if __name__ == "__main__":

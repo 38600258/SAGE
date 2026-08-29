@@ -121,7 +121,7 @@
 
 | 常量 | 说明 |
 |---|---|
-| `_META_PREFIXES` | 元文件前缀（docs/、templates/、scripts/、prompts/ 等），范围锁定/CHANGELOG 校验中排除 |
+| `_META_PREFIXES` | 元文件前缀（.sage/、docs/、templates/、scripts/、prompts/ 等），范围锁定/CHANGELOG 校验中排除；`.sage/` 为 linter 运行日志目录 |
 | `_META_EXACT` | 精确元文件名（AGENTS.md、CHANGELOG.md 等） |
 | `_IS_HOOK` | 由环境变量 `ANTIGRAVITY_HOOK=1` 触发，精简输出为 JSON |
 
@@ -130,6 +130,8 @@
 | 函数 | 职责 |
 |---|---|
 | `_is_meta_file(filepath)` | 判定是否为工作流元文件（非项目源码） |
+| `_rule_id_from_label(label)` | 从检查器标签提取稳定规则 ID（SAGE-XX），兼容 `[N/16]` 与 `N.` 两种形态，不可解析返回 None |
+| `write_run_log(...)` | 运行结果单行 JSON 追加至 `.sage/linter-runs.jsonl`（拦截频率统计；best-effort 不影响退出码；hook 模式仅记录存在 fail/warn 的运行） |
 | `run_git_cmd(args, cwd)` | 运行 git 命令，失败静默返回空串 |
 | `get_git_diff_files(cwd)` | 收集变更文件（已暂存+未暂存+未跟踪），兼容 porcelain 全状态码 |
 | `get_file_lines(path)` | UTF-8 容错读取文件行 |
@@ -139,13 +141,14 @@
 #### 类
 
 **`CheckResult`**（单个检查结果）
-- 属性：`checker`（名称）、`status`（pass/warn/fail）、`message`。
+- 属性：`checker`（名称）、`status`（pass/warn/fail）、`message`、`rule_id`（稳定规则 ID，由标签编号派生，无法解析时为 None 并在输出中省略）。
 - 方法：`to_dict()` / `to_json()` 供多格式输出。
 
 **`ResultCollector`**（结果收集 + 格式化）
-- 入口：`add(checker_name, ok, message)` — `ok=True` 且含 `⚠️` 判定为 warn。
+- 入口：`add(checker_name, ok, message)` — `ok=True` 且含 `⚠️` 判定为 warn；同时从标签派生 `rule_id`。
 - 属性：`has_fail` / `has_warn` / `exit_code()`（0=通过,1=警告,2=阻断）。
-- 输出：`flush_text()` / `flush_json()` / `flush_artifact()`（Markdown 报告）/ `flush()`。
+- 输出：`flush_text()` / `flush_json()` / `flush_artifact()`（Markdown 报告）/ `flush()`；fail/warn 在三种格式中统一携带 `[SAGE-XX]` 规则 ID（json 为独立 `rule_id` 字段）。
+- 启发式判定披露：风险扩展/盲审完整性/执行通道记录/模型元数据四个检查器的 fail 消息自述命中依据（命中的占位词、完整判定词表、要求的标题/行格式）；判定语义与词表内容不变（T-014）。
 
 #### 16 个检查器（模块的"大脑"）
 
@@ -155,7 +158,7 @@
 | 2 | `check_task_structure` | 任务 5 阶段大节齐全有序 |
 | 3 | `check_task_risk_sections` | L2/L3 必须有 1.3a 验收标准（AC-ID 可证伪契约）+ 1.3b 风险矩阵 |
 | 4 | `check_git_branch_isolation` | 禁在受保护分支开发；分支名符合 `feat/t-XXX-*` 等规范 |
-| — | `check_commit_message` | Conventional Commit + 描述含中文（commit-msg 门禁核心） |
+| 17 | `check_commit_message` | Conventional Commit + 描述含中文（commit-msg 门禁核心；hook 专属检查器，编号 17 避免与 [15/16] 执行通道记录校验歧义） |
 | 5 | `check_t2_document_lines` | guides 下规范文档 ≤500 行 |
 | 6 | `check_document_freshness` | 文档 ≤30 天未更新（警告级，不阻塞） |
 | 7 | `check_templates_pristine` | 模板目录被篡改即阻断 |
@@ -173,6 +176,7 @@
 
 - 子命令开关：`--check-task`、`--all`、`--check-branch/scope/commit-msg/freshness/links`。
 - 输出格式：`--format text|json|artifact`、`--artifact`（等价 artifact）、`--antigravity`（旧兼容）。
+- 运行日志：默认每次运行向 `<sage_root>/.sage/linter-runs.jsonl` 追加单行 JSON（ts/mode/exit_code/fail/warn 规则 ID），`--no-log` 关闭；hook 模式仅记录存在 fail/warn 的运行。
 - 自动定位项目根：从 `cwd` 向上找含 `AGENTS.md` 的目录。
 - 单项检查模式（供 hooks/cron 高频）与全量模式两套调度路径。
 

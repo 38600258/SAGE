@@ -10,3 +10,6 @@ Thumbs.db
 .DS_Store
 .idea/
 .vscode/
+
+# SAGE linter 运行日志
+.sage/
