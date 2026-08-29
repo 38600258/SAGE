@@ -16,11 +16,19 @@ SAGE = Steer, Agent Goes Execute (人类掌舵，智能体执行)
     python scripts/sage_linter.py --check-links          # 交叉引用单独校验
     python scripts/sage_linter.py --all --format json    # JSON 结构化输出
     python scripts/sage_linter.py --all --artifact        # Markdown 报告
+    python scripts/sage_linter.py --all --no-log          # 禁用运行日志写入
 
 退出码:
     0 = 全部通过
     1 = 有警告（但无阻断）
     2 = 有阻断性问题
+
+规则 ID 与运行日志:
+    fail/warn 结果携带稳定规则 ID（SAGE-01~17，由检查器标签编号派生），text/json/artifact
+    三种格式统一输出；消息内同时披露启发式判定的命中依据（命中的占位词/缺失的格式）。
+    默认每次运行向 <sage_root>/.sage/linter-runs.jsonl 追加单行 JSON
+    （ts/mode/exit_code/fail/warn），供统计各检查器拦截频率；--no-log 关闭；
+    ANTIGRAVITY_HOOK=1 高频调用仅记录存在 fail/warn 的运行。
 """
 
 import argparse
@@ -37,7 +45,8 @@ from pathlib import Path
 # ==============================================================================
 
 # 元文件前缀与文件名（范围锁定和 CHANGELOG 校验中需排除的非项目源文件）
-_META_PREFIXES = ("docs/", "templates/", "archive/", "scripts/", "prompts/")
+# .sage/ 为 linter 自身运行日志目录，避免门禁产物被误判为项目源码
+_META_PREFIXES = (".sage/", "docs/", "templates/", "archive/", "scripts/", "prompts/")
 _META_EXACT = {
     "AGENTS.md", "AGENTS.override.md", "ARCHITECTURE.md", "CHANGELOG.md", "GEMINI.md",
     ".gitignore", ".env", ".editorconfig",
@@ -123,17 +132,35 @@ def get_file_lines(path):
 # 结果收集器（支持多格式输出）
 # ==============================================================================
 
+def _rule_id_from_label(label):
+    """从检查器显示标签提取稳定规则 ID（SAGE-XX）
+
+    兼容两种标签形态：全量模式 "[10/16] 范围锁定校验" 与单项模式 "10. 范围锁定校验"。
+    无法解析编号时返回 None，输出侧降级为不标注规则 ID，不影响判定结果。
+    """
+    match = re.match(r"^(?:\[(\d+)/\d+\]|(\d+)[.、])", label.strip())
+    if not match:
+        return None
+    return f"SAGE-{int(match.group(1) or match.group(2)):02d}"
+
+
 class CheckResult:
     """单个检查器的结果"""
-    __slots__ = ("checker", "status", "message")
+    __slots__ = ("checker", "status", "message", "rule_id")
 
-    def __init__(self, checker, status, message):
+    def __init__(self, checker, status, message, rule_id=None):
         self.checker = checker      # 检查器名称
         self.status = status        # "pass" | "warn" | "fail"
         self.message = message      # 详细信息
+        self.rule_id = rule_id      # 稳定规则 ID（SAGE-XX），无法派生时为 None
 
     def to_dict(self):
-        return {"checker": self.checker, "status": self.status, "message": self.message}
+        return {
+            "checker": self.checker,
+            "status": self.status,
+            "message": self.message,
+            "rule_id": self.rule_id,
+        }
 
     def to_json(self):
         return json.dumps(self.to_dict(), ensure_ascii=False)
@@ -154,7 +181,7 @@ class ResultCollector:
             status = "pass"
         else:
             status = "fail"
-        self.results.append(CheckResult(checker_name, status, message))
+        self.results.append(CheckResult(checker_name, status, message, _rule_id_from_label(checker_name)))
 
     @property
     def has_fail(self):
@@ -174,21 +201,23 @@ class ResultCollector:
 
     def flush_text(self):
         """以纯文本格式输出所有结果"""
-        warns = []
+        warn_results = []
         for r in self.results:
             icon = {"pass": "🟢", "warn": "🟡", "fail": "🔴"}[r.status]
             tag = {"pass": "OK", "warn": "WARN", "fail": "FAIL"}[r.status]
+            rule_tag = f"[{r.rule_id}] " if r.rule_id else ""
             if r.status == "warn":
-                warns.append(r.message)
+                warn_results.append(r)
                 print(f"  {icon} {r.checker}: {tag}")
             elif r.status == "pass":
                 print(f"  {icon} {r.checker}: {r.message}")
             else:
-                print(f"  {icon} {r.checker}: {tag}\n    👉 {r.message}")
-        if warns:
+                print(f"  {icon} {r.checker}: {tag}\n    👉 {rule_tag}{r.message}")
+        if warn_results:
             print("\n💡 警告细节:")
-            for w in warns:
-                print(w)
+            for r in warn_results:
+                rule_tag = f"[{r.rule_id}] " if r.rule_id else ""
+                print(f"{rule_tag}{r.message}")
 
     def flush_json(self):
         """以 JSON 格式输出所有结果"""
@@ -233,8 +262,9 @@ class ResultCollector:
         ]
         for i, r in enumerate(self.results, 1):
             icon = {"pass": "✅", "warn": "⚠️", "fail": "❌"}[r.status]
+            rule_tag = f"[{r.rule_id}] " if r.rule_id else ""
             # 在 Markdown 表格中转义管道符和换行
-            msg = r.message.replace("|", "\\|").replace("\n", " ")
+            msg = (rule_tag + r.message).replace("|", "\\|").replace("\n", " ")
             if len(msg) > 120:
                 msg = msg[:117] + "..."
             lines.append(f"| {i} | {r.checker} | {icon} | {msg} |")
@@ -246,7 +276,7 @@ class ResultCollector:
             lines.append("## ❌ 阻断项详情")
             for r in fail_results:
                 lines.append("")
-                lines.append(f"### {r.checker}")
+                lines.append(f"### {r.checker}（{r.rule_id}）" if r.rule_id else f"### {r.checker}")
                 lines.append("")
                 lines.append(r.message)
 
@@ -387,18 +417,25 @@ def check_task_risk_sections(task_file):
         auto_count = 0
         manual_count = 0
         placeholder_markers_ac = ["(如", "（如", "待填", "...", "可证伪验收标准", "验证方式", "证据位置"]
+        cell_names = ("验收标准", "验证方式", "证据位置")
         for ac_id, ac_type, criterion, verify, evidence in ac_rows:
             if ac_type not in ["[auto]", "[manual]"]:
-                invalid_ac.append(f"{ac_id}: 类型必须为 [auto] 或 [manual]")
+                invalid_ac.append(f"{ac_id}: 类型列当前值 \"{ac_type}\"，必须为 [auto] 或 [manual]")
             if ac_type == "[auto]":
                 auto_count += 1
             if ac_type == "[manual]":
                 manual_count += 1
-            values = [criterion, verify, evidence]
-            if any(not value for value in values) or any(
-                any(marker in value for marker in placeholder_markers_ac) for value in values
-            ):
-                invalid_ac.append(f"{ac_id}: 验收标准、验证方式或证据位置仍为空或占位")
+            # 逐单元格披露判定依据：空列与占位命中分别报告，并附完整判定词表
+            for cell_name, value in zip(cell_names, (criterion, verify, evidence)):
+                if not value:
+                    invalid_ac.append(f"{ac_id}: {cell_name} 列为空")
+                    continue
+                hit_marker = next((m for m in placeholder_markers_ac if m in value), None)
+                if hit_marker:
+                    invalid_ac.append(
+                        f"{ac_id}: {cell_name} 列 \"{value}\" 命中占位符标记 \"{hit_marker}\""
+                        f"（判定词表: {'、'.join(placeholder_markers_ac)}）"
+                    )
 
         if not ac_rows:
             return False, (
@@ -406,7 +443,7 @@ def check_task_risk_sections(task_file):
                 "请为每条验收标准填写 AC-ID、[auto]/[manual]、验证方式和证据位置。"
             )
         if invalid_ac:
-            return False, "验收标准映射不完整：\n  - " + "\n  - ".join(invalid_ac)
+            return False, "验收标准映射不完整（判定依据见各项）：\n  - " + "\n  - ".join(invalid_ac)
 
         acceptance_warning = ""
         if manual_count > 0 and auto_count == 0:
@@ -418,11 +455,20 @@ def check_task_risk_sections(task_file):
         table_lines = [l.strip() for l in section_content_b.splitlines() if "|" in l]
         # 表格应该有表头、分割线、以及至少一行非占位符的真实数据
         placeholder_markers = ["风险描述", "低/中/高", "缓解方案", "待填", "缓解措施"]
-        data_rows = table_lines[2:] if len(table_lines) >= 3 else []
-        if len(table_lines) < 3 or all(
-            any(m in row for m in placeholder_markers) for row in data_rows
-        ):
-            return False, f"风险等级为 {risk_level}，但 ### 1.3b 风险矩阵 未填写具体的风险防范矩阵。"
+        if len(table_lines) < 3:
+            return False, (
+                f"风险等级为 {risk_level}，但 ### 1.3b 风险矩阵 缺少完整表格"
+                f"（需表头行 + 分隔行 + 至少一行数据，当前仅 {len(table_lines)} 行）。"
+            )
+        data_rows = table_lines[2:]
+        rows_with_hit = [row for row in data_rows if any(m in row for m in placeholder_markers)]
+        if len(rows_with_hit) == len(data_rows):
+            hit_markers = sorted({m for row in data_rows for m in placeholder_markers if m in row})
+            return False, (
+                f"风险等级为 {risk_level}，但 ### 1.3b 风险矩阵 未填写具体内容："
+                f"全部 {len(data_rows)} 行数据均命中占位符标记（命中: {'、'.join(hit_markers)}；"
+                f"判定词表: {'、'.join(placeholder_markers)}）。请替换为真实的风险条目。"
+            )
 
     return True, f"风险分级扩展项校验通过 (风险等级: {risk_level})" + (acceptance_warning if risk_level in ["L2", "L3"] else "")
 
@@ -900,12 +946,23 @@ def check_review_complete(task_file):
         ["## 🧠 阶段 5", "## 阶段 5"],
     )
 
-    def is_review_filled(section):
+    placeholders = ["由 reviewer 填写", "如有修改", "评审反馈", "待填", "(由", "(如有"]
+    substantive_markers = ["审查结果", "OK", "WARN", "BLOCK", "✅", "⚠️", "🛑"]
+
+    def diagnose_review_section(section):
+        """三态诊断：章节缺失 / 无审查结论标记 / 有标记但仅占位文本。
+
+        判定语义与词表内容保持不变，仅把判定理由返回给调用方用于消息披露。
+        返回 None 表示章节有效。
+        """
         if not section:
-            return False
-        placeholders = ["由 reviewer 填写", "如有修改", "评审反馈", "待填", "(由", "(如有"]
-        substantive_markers = ["审查结果", "OK", "WARN", "BLOCK", "✅", "⚠️", "🛑"]
-        has_marker = any(m in section for m in substantive_markers)
+            return "章节不存在（要求标题: ### 2.1 评审意见 / ### 4.1 代码评审）"
+        if not any(m in section for m in substantive_markers):
+            return (
+                "章节存在但未找到审查结论标记（判定词表: "
+                + "/".join(substantive_markers)
+                + "）；请写明审查结果 OK/WARN/BLOCK 或对应符号"
+            )
         has_content = any(
             line.strip()
             and not line.strip().startswith("###")
@@ -914,19 +971,26 @@ def check_review_complete(task_file):
             and not any(p in line for p in placeholders)
             for line in section.splitlines()
         )
-        return has_marker and has_content
+        if not has_content:
+            return (
+                "存在审查标记但无实质内容（除标题、空复选框与占位行外无有效文本；"
+                "占位词表: " + "/".join(placeholders) + "）"
+            )
+        return None
 
-    missing = []
-    if not is_review_filled(plan_section):
-        missing.append("2.1 计划评审报告")
-    if not is_review_filled(code_section):
-        missing.append("4.1 代码评审报告")
+    problems = []
+    plan_reason = diagnose_review_section(plan_section)
+    if plan_reason:
+        problems.append(f"2.1 计划评审报告：{plan_reason}")
+    code_reason = diagnose_review_section(code_section)
+    if code_reason:
+        problems.append(f"4.1 代码评审报告：{code_reason}")
 
-    if missing:
+    if problems:
         return False, (
-            f"🛑 盲审结果缺失：风险等级为 {risk_level}，但以下章节未写入有效审查报告："
-            + "、".join(missing)
-            + "。调用 agy 后必须确认 TASK 文档对应章节已写入 OK/WARN/BLOCK 等 Markdown 审查结果，"
+            f"🛑 盲审结果缺失：风险等级为 {risk_level}，以下章节未写入有效审查报告：\n  - "
+            + "\n  - ".join(problems)
+            + "\n调用 agy 后必须确认 TASK 文档对应章节已写入 OK/WARN/BLOCK 等 Markdown 审查结果，"
             + "否则不得继续流转。"
         )
 
@@ -951,22 +1015,22 @@ def check_model_metadata(task_file):
 
     model_value = model_match.group(1).strip()
 
-    # 检测空值或占位符文本
+    # 检测空值或占位符文本（正则与类别标签配对，命中时向消息披露判定依据）
     placeholder_patterns = [
-        r'^\s*$',                           # 空值
-        r'^\[.*\]$',                        # 方括号占位符 [填写实际使用的模型]
-        r'待填',                            # 待填
-        r'TBD',                             # TBD
-        r'N/?A',                            # N/A
-        r'^[-—]+$',                         # 破折号占位
-        r'^\(.*\)$',                        # 括号占位符
-        r'填写',                            # 包含"填写"
+        (r'^\s*$', "空值"),
+        (r'^\[.*\]$', "方括号占位符"),
+        (r'待填', "占位词\"待填\""),
+        (r'TBD', "占位词 TBD"),
+        (r'N/?A', "占位词 N/A"),
+        (r'^[-—]+$', "破折号占位"),
+        (r'^\(.*\)$', "括号占位符"),
+        (r'填写', "占位词\"填写\""),
     ]
 
-    for pat in placeholder_patterns:
+    for pat, label in placeholder_patterns:
         if re.search(pat, model_value, re.IGNORECASE):
             return False, (
-                f"⚠️ 任务文档元数据中的\"使用模型\"字段仍为占位符文本: \"{model_value}\"。"
+                f"⚠️ 任务文档元数据中的\"使用模型\"字段仍为占位符文本: \"{model_value}\"（命中判定: {label}）。"
                 f"\n请填写实际使用的模型名称（如强推理模型、快速编码模型、agy CLI reviewer 等）。"
             )
 
@@ -1013,20 +1077,26 @@ def check_execution_channel_records(task_file):
         pattern = rf"###\s+{re.escape(section_id)}\s+执行通道记录.*?(?=\n###\s+|\n##\s+|\Z)"
         match = re.search(pattern, content, re.S)
         if not match:
-            missing.append(f"{section_id} {section_name}")
+            missing.append(f"{section_id} {section_name}（要求标题: ### {section_id} 执行通道记录）")
             continue
         section = match.group(0)
         for label in required_labels:
             label_match = re.search(rf'-\s*\[\s*([xX\s])\s*\]\s*\*\*{label}\*\*:\s*(.+)', section)
             if not label_match:
-                incomplete.append(f"{section_id} {section_name}: 缺少 {label}")
+                incomplete.append(
+                    f"{section_id} {section_name}: 缺少 {label}（要求行格式: - [x] **{label}**: 实际内容）"
+                )
                 continue
             checked, value = label_match.groups()
             value = value.strip()
             if checked.strip() == "":
-                incomplete.append(f"{section_id} {section_name}: {label} 未勾选")
-            elif not value or "待填" in value or "(填写" in value:
-                incomplete.append(f"{section_id} {section_name}: {label} 仍为占位")
+                incomplete.append(f"{section_id} {section_name}: {label} 复选框未勾选（[ ] 需改为 [x]）")
+            elif not value:
+                incomplete.append(f"{section_id} {section_name}: {label} 值为空，需填写实际内容")
+            elif "待填" in value or "(填写" in value:
+                incomplete.append(
+                    f"{section_id} {section_name}: {label} 值 \"{value}\" 为占位文本（判定词: 待填、(填写）"
+                )
 
     if missing or incomplete:
         msg = "🛑 阶段执行通道记录不完整：\n"
@@ -1118,6 +1188,36 @@ def find_active_task(sage_root):
     return active_tasks[0] if active_tasks else None
 
 
+def write_run_log(sage_root, mode, collector, hook_mode=None):
+    """将本次门禁运行结果以单行 JSON 追加到 .sage/linter-runs.jsonl
+
+    用于统计各检查器（规则 ID）的实际拦截频率。best-effort 写入：
+    任何失败静默忽略，绝不影响门禁退出码与判定结果。
+    hook_mode 缺省取模块常量 _IS_HOOK；hook 高频调用下仅记录存在 fail/warn 的运行。
+    单测可通过 hook_mode 参数注入验证降频分支，不依赖 import 期环境变量。
+    """
+    if hook_mode is None:
+        hook_mode = _IS_HOOK
+    try:
+        fails = [r.rule_id for r in collector.results if r.status == "fail" and r.rule_id]
+        warns = [r.rule_id for r in collector.results if r.status == "warn" and r.rule_id]
+        if hook_mode and not fails and not warns:
+            return
+        log_dir = Path(sage_root) / ".sage"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "mode": mode,
+            "exit_code": collector.exit_code(),
+            "fail": fails,
+            "warn": warns,
+        }
+        with open(log_dir / "linter-runs.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 # ==============================================================================
 # CLI 入口与多功能调度
 # ==============================================================================
@@ -1164,6 +1264,8 @@ def main():
                         help="等价于 --format artifact，生成 Markdown 报告到 stdout")
     parser.add_argument("--antigravity", action="store_true",
                         help="兼容旧参数：等价于 --artifact")
+    parser.add_argument("--no-log", action="store_true",
+                        help="禁用运行日志写入（默认记录到 .sage/linter-runs.jsonl 统计拦截频率）")
 
     args = parser.parse_args()
 
@@ -1211,6 +1313,22 @@ def main():
     # 创建结果收集器
     collector = ResultCollector(fmt=args.format)
 
+    # 运行模式标识（写入运行日志，区分全量/任务级/单项检查）
+    if args.check_branch:
+        run_mode = "branch"
+    elif args.check_scope:
+        run_mode = "scope"
+    elif args.check_commit_msg:
+        run_mode = "commit-msg"
+    elif args.check_freshness:
+        run_mode = "freshness"
+    elif args.check_links:
+        run_mode = "links"
+    elif args.check_task:
+        run_mode = "task"
+    else:
+        run_mode = "all"
+
     # ======================================================================
     # 单项快速检查模式（供 hooks / cron 高频调用）
     # ======================================================================
@@ -1229,7 +1347,7 @@ def main():
 
         if args.check_commit_msg:
             ok, msg = check_commit_message(args.check_commit_msg)
-            collector.add("15. 提交信息中文校验", ok, msg)
+            collector.add("17. 提交信息中文校验", ok, msg)
 
         if args.check_freshness:
             ok, msg = check_document_freshness(docs_dir, args.stale_days)
@@ -1240,6 +1358,8 @@ def main():
             collector.add("11. 交叉引用校验", ok, msg)
 
         collector.flush()
+        if not args.no_log:
+            write_run_log(sage_root, run_mode, collector)
         sys.exit(collector.exit_code())
 
     # ======================================================================
@@ -1372,6 +1492,9 @@ def main():
             print("\n⚠️ 扫描发现警告项（非阻断）。建议关注上述标黄(🟡)项目。")
         else:
             print("\n❌ 扫描发现阻断级错误。请修正上述标红(🔴)项目后重试。")
+
+    if not args.no_log:
+        write_run_log(sage_root, run_mode, collector)
 
     sys.exit(exit_code)
 

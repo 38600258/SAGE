@@ -84,6 +84,8 @@ git commit -m "<类型>(<范围>): <描述>"
 
 退出前执行：`uv run python scripts/sage_linter.py --all`
 
+被拦处置：fail/warn 消息自带规则 ID（`[SAGE-XX]`）与命中依据（命中的占位词、缺失的格式）；先按消息披露修复，仅当信息仍不足时才读 `sage_linter.py` 对应检查器函数，禁止盲目试错重跑。
+
 质量门禁通过后，再确认 `1.3a` 验收标准与 `3.2` 证据链一一闭环；TASK 仍有未闭环 `AC-ID` 时不得提交或归档。
 
 ---

@@ -4,6 +4,13 @@
 > 注：历史条目原本只记录日期，迁移到单行标题格式时用 `00:00:00` 作为回溯补齐时间。
 
 
+## [1.5.0] ✨ Feature 质量门禁自解释改造：规则 ID 全量标注、命中依据披露与拦截频率日志 (T-014) - 2026-08-29 14:47:42
+- 规则 ID 中心化标注（SAGE-01~17）：`ResultCollector.add` 经 `_rule_id_from_label` 从检查器标签编号派生稳定规则 ID（兼容 `[N/16]` 与 `N.` 两种形态，不可解析时降级省略），fail/warn 在 text/json/artifact 三格式统一携带（json 为独立 `rule_id` 字段）；16 个检查器函数签名与判定语义零改动。
+- 4 个启发式黑盒检查器命中依据披露（仅披露，判定语义与词表内容不变）：`check_task_risk_sections` AC 表逐单元格报告空列/命中占位词并附判定词表全量、风险矩阵区分表格缺失与数据行占位两类情形；`check_review_complete` 三态诊断（章节不存在/无审查结论标记/有标记但仅占位文本）并列出对应词表；`check_execution_channel_records` 披露要求的标题格式与 `- [x] **标签**: 内容` 行格式；`check_model_metadata` 按类别披露占位符命中。
+- 拦截频率运行日志：每次运行向 `.sage/linter-runs.jsonl` 追加单行 JSON（ts/mode/exit_code/fail/warn 规则 ID 列表），供统计各检查器实际拦截频率；best-effort 写入绝不影响退出码；`--no-log` 显式关闭；hook 模式仅记录存在 fail/warn 的运行；`.sage/` 纳入 `_META_PREFIXES` 防止门禁产物误触发范围锁定/CHANGELOG 联动校验。
+- 编号歧义修复：提交信息单项检查器标签 "15." → "17."（SAGE-17），消除与全量模式 [15/16] 执行通道记录校验的编号冲突。
+- 左移降频率：coder/closer 角色契约质量门禁步骤追加「门禁被拦处置顺序」（规则 ID 与命中依据优先、源码最后）；CODE_WIKI 4.1 同步；单测 35 → 53 例全绿（新增规则 ID 派生/JSON 字段/四项披露/运行日志/元文件判定共 18 例，bootstrap 透传资产可移植性保持）。
+
 ## [1.4.0] 🛠️ Fix 清偿遗留技术债 TD-2/TD-4/TD-6 (T-013) - 2026-08-19 09:15:50
 - TD-2 provision 报错语义区分：`locate_provision_script` 在候选 provision.py 全缺失时先经 `profile_candidates` 探测 adapter JSON——均无 JSON 报「找不到 adapter '<id>'（请检查适配器 id 拼写；若运行在独立环境请确认 skill 已挂载或指定 --repo-root）」，有 JSON 无 provision 报「adapter '<id>' 不提供子代理生成」；删除「cli/generic-tool 无原生 subagent 注册能力」误导后缀（对 claude-code 等有 subagent 能力、仅定位失败的场景构成误导）。新增未知 adapter 用例 + 既有用例断言更新（stderr 独立验证：`--adapter nope`/`--adapter cli` 两种语义各得其所）。
 - TD-4 bootstrap 构建产物过滤：`bootstrap_sage.py` 新增模块级 `_is_build_artifact(path)`（任一父目录名 `__pycache__` 或后缀 `.pyc`/`.pyo`），应用于 build_plan 两处 rglob（core 六目录 + adapters 整目录）的 is_file 分支，集中式单一实现保证过滤口径一致（避免 T-001 式两处漂移）；dry-run 实证输出零 `__pycache__`/`.pyc`/`.pyo` 匹配。
