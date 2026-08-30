@@ -166,10 +166,10 @@
 | 9 | `check_append_only` | 决策/变更日志只增不改（区分真实删除与换行误报） |
 | 10 | `check_scope_lock` | 实际改动文件落在 TASK 1.4 Writeable 白名单 |
 | 11 | `check_cross_links` | 本地 md 相对链接有效 |
-| 12 | `check_evidence_complete` | 3.2 证据链的测试/Lint 已勾选 |
-| 13 | `check_review_complete` | L2/L3 必须写入 2.1/4.1 盲审报告（判定前剥离 HTML 注释——TD-8：模板门禁注释含 OK/WARN/BLOCK，不剥离则空章节恒放行） |
+| 12 | `check_evidence_complete` | 3.2 证据链的测试/Lint 已勾选（阶段解析经 `_parse_current_stage`——TD-9：元数据为模板默认值时阻断并披露） |
+| 13 | `check_review_complete` | L2/L3 必须写入 2.1/4.1 盲审报告（判定前剥离 HTML 注释——TD-8：模板门禁注释含 OK/WARN/BLOCK，不剥离则空章节恒放行；元数据为模板默认值时阻断——TD-9） |
 | 14 | `check_model_metadata` | 任务元数据"使用模型"非占位符 |
-| 15 | `check_execution_channel_records` | L1+ 已到达阶段必须记录角色契约/执行通道/偏离 |
+| 15 | `check_execution_channel_records` | L1+ 已到达阶段必须记录角色契约/执行通道/偏离（阶段解析经 `_parse_current_stage`——TD-9：元数据为模板默认值时阻断并披露） |
 | 16 | `check_unit_tests` | `--all` 场景以子进程真实执行单测套件（TD-3：失败/超时即阻断；无 tests 目录则跳过） |
 
 #### 主入口 `main()`

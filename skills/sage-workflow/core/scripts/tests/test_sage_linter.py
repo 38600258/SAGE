@@ -458,6 +458,73 @@ class RuleIdAndDisclosureTests(unittest.TestCase):
         self.assertIn("2.1 计划评审报告", msg)
         self.assertIn("4.1 代码评审报告", msg)
 
+    # ---------- TD-9 回归：模板默认值元数据不得被误判为 init ----------
+
+    def test_stage_template_default_blocks_evidence_check(self) -> None:
+        # 元数据仍为模板管道默认行：check_evidence_complete 不得按 init 跳过，须阻断并披露
+        task = self.write_task(
+            "# TASK\n\n"
+            "- **风险等级**: L2\n"
+            "- **当前阶段**: init | plan-review | dev | code-review | close\n\n"
+            "### 3.2 🧪 证据链\n"
+            "- [ ] **AC-1**: 待回填\n"
+            "- [ ] **自动化测试结果**: 待回填\n"
+            "- [ ] **Lint 检查结果**: 待回填\n"
+        )
+        ok, msg = self.linter.check_evidence_complete(task)
+        self.assertFalse(ok)
+        self.assertIn("模板默认值", msg)
+        self.assertIn("当前阶段", msg)
+
+    def test_stage_template_default_blocks_review_check(self) -> None:
+        # 元数据仍为模板管道默认行：check_review_complete 不得按 init 跳过，须阻断并披露
+        task = self.write_task(
+            "# TASK\n\n- **风险等级**: L2\n"
+            "- **当前阶段**: init | plan-review | dev | code-review | close\n\n"
+            "### 2.1 评审意见 (Review Feedback)\n\n"
+            "<!-- 门禁注释：OK/WARN/BLOCK -->\n\n"
+            "## 💻 阶段 3：开发与验证\n\n"
+            "### 4.1 代码评审 (Code Review Feedback)\n\n"
+            "<!-- 门禁注释：OK/WARN/BLOCK -->\n\n"
+            "## 🧠 阶段 5：收尾与归档\n"
+        )
+        ok, msg = self.linter.check_review_complete(task)
+        self.assertFalse(ok)
+        self.assertIn("模板默认值", msg)
+
+    def test_stage_template_default_blocks_execution_channel_check(self) -> None:
+        # 元数据仍为模板管道默认行：check_execution_channel_records 不得按 init 仅要求 1.0；
+        # 1.0 预先填好以隔离默认值判定，排除未勾选噪声
+        task = self.write_task(
+            "# TASK\n\n"
+            "- **风险等级**: L2\n"
+            "- **当前阶段**: init | plan-review | dev | code-review | close\n\n"
+            "执行通道记录\n\n"
+            "### 1.0 执行通道记录\n"
+            "- [x] **角色契约**: prompts/planner.md 已加载并遵循\n"
+            "- [x] **执行通道**: Main Agent\n"
+            "- [x] **偏离处理**: N/A\n"
+        )
+        ok, msg = self.linter.check_execution_channel_records(task)
+        self.assertFalse(ok)
+        self.assertIn("模板默认值", msg)
+
+    def test_parse_current_stage_no_token_path(self) -> None:
+        # helper 直测：值全为非 ASCII 占位文本（无 [a-z-]+ token）→ 与"缺失"等价 ("", False)（计划盲审建议 4）
+        stage, is_default = self.linter._parse_current_stage("- **当前阶段**: [填写实际阶段]")
+        self.assertEqual(stage, "")
+        self.assertFalse(is_default)
+        # 模板管道默认行 → 默认值标记
+        stage, is_default = self.linter._parse_current_stage(
+            "- **当前阶段**: init | plan-review | dev | code-review | close"
+        )
+        self.assertEqual(stage, "")
+        self.assertTrue(is_default)
+        # 正常值
+        stage, is_default = self.linter._parse_current_stage("- **当前阶段**: dev")
+        self.assertEqual(stage, "dev")
+        self.assertFalse(is_default)
+
     # ---------- 执行通道记录格式披露 ----------
 
     def test_execution_channel_missing_section_disclosure(self) -> None:

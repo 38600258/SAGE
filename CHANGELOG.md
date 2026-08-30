@@ -4,6 +4,11 @@
 > 注：历史条目原本只记录日期，迁移到单行标题格式时用 `00:00:00` 作为回溯补齐时间。
 
 
+## [1.5.2] 🐛 BugFix 修复 TD-9：阶段元数据模板默认值被误判为 init 的三检查器共享暴露 (T-016) - 2026-08-29 23:45:41
+- TD-9 修复（对管道默认值报错）：`sage_linter.py` 新增模块级 `_parse_current_stage(content)`（三阶段感知检查器共享单一实现，整行捕获元数据值——含 `|` 判定为模板默认行未更新、否则提取首个 `[a-z-]+` token）。`check_evidence_complete`/`check_review_complete`/`check_execution_channel_records` 三处解析点统一替换：元数据仍为模板默认行 `- **当前阶段**: init | plan-review | ...` 时不再被 `([a-z-]+)` 误捕获为 "init"，改为显式阻断并披露「模板默认值（未更新）」与更新指引——此前任务推进后未更新元数据会被误判 init 而跳过阶段感知校验（证据链/盲审报告/执行通道记录三面误放行暴露，T-015 代码盲审建议 2 备案）。
+- 语义保持与漂移消除：已填阶段值的既有行为零变化（init 跳过、plan-review/dev 仅 2.1 到期、code-review/close 双节到期、缺失 fail-safe、未知值报错）；执行通道检查器原对元数据缺失默认 "close"（最严）的行为保留。三处独立正则实现收敛为单一 helper（T-013 `_is_build_artifact` 集中式教训同款）。新模板未填元数据的场景 `check_model_metadata` 本就因占位符阻断，本修复不扩大新任务 init 期行为面。
+- 测试与文档同步：`test_sage_linter.py` 新增 4 例（三检查器模板默认值阻断 + `_parse_current_stage` 直测：管道默认行/无 token 非 ASCII 占位/正常值三分支），全量单测 62 → 66 例全绿；CODE_WIKI.md 检查器清单 12/13/15 三行补 TD-9 阻断语义注记。
+
 ## [1.5.1] 🐛 BugFix 清偿遗留技术债 TD-7/TD-8：模板执行通道失效路径与盲审校验 HTML 注释误放行 (T-015) - 2026-08-29 22:44:27
 - TD-7 模板失效路径修复（双语境同构）：`TASK-TEMPLATE.md` 执行通道配置默认值从 `docs/guides/execution-channels.md`（本仓库不存在该目录，T-013 起每份 TASK 元数据沿用失效路径）改为 skill 源仓库权威路径 `skills/sage-workflow/core/guides/execution-channels.md`；`bootstrap_sage.py` 新增 `render_template(content)` 转换（`skills/sage-workflow/core/guides/` → `docs/guides/`，与 `render_entry`「源为 skill 语境、复制时转换为目标项目语境」同构），`build_plan` templates 条目携带 `template` 转换、`main()` 新增对应写出分支。临时空仓库真实 bootstrap 实证：落盘模板 L15 已重写、目标项目 `docs/guides/execution-channels.md` 真实存在。
 - TD-8 盲审完整性校验修复（含阶段感知伴生修改）：`sage_linter.py` 新增 `_strip_html_comments`（DOTALL 非贪婪，含跨行注释），`check_review_complete` 判定前统一剥离 HTML 注释——模板 2.1/4.1 节内置门禁注释含 OK/WARN/BLOCK 字样，此前既命中结论标记词表、注释行又计为实质内容，空章节恒放行、盲审门禁形同虚设。同函数补阶段感知（T-011 为 `check_evidence_complete` 建立的同构模式）：`init` 阶段两节均未到期跳过，`plan-review`/`dev` 仅 2.1 计划评审报告到期（4.1 未到期在通过消息中提示），`code-review`/`close` 两节均到期，元数据缺失或未知阶段维持强制（fail-safe）——此前早期阶段的空节靠本缺陷恒放行，修复后必须补阶段感知，否则所有后续任务 init/dev 期门禁误报阻断。三态诊断结构、判定词表与披露文案零改动（T-014「判定语义与披露内容严格分离」原则延续）；`dispatch_phase.py` verify 经核查用严格格式正则 `审查结果[：:] OK|WARN|BLOCK`，无同源缺陷，不纳入本次范围。

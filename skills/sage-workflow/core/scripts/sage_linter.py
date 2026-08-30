@@ -856,6 +856,26 @@ def check_cross_links(scan_dir):
 
     return True, "交叉引用验证通过 (所有本地链接均有效)"
 
+def _parse_current_stage(content: str) -> tuple[str, bool]:
+    """解析任务元数据「当前阶段」（TD-9，三阶段感知检查器共享单一实现）。
+
+    返回 (stage, is_template_default)：
+    - stage: 元数据声明的阶段值（首个小写 token）；标签行缺失或无法提取 token 时为 ""
+    - is_template_default: 元数据仍为模板管道默认行（未更新）时为 True
+
+    模板默认行 `- **当前阶段**: init | plan-review | ...` 曾被 ([a-z-]+) 捕获为 "init"，
+    任务推进后未更新元数据会被误判为 init 而跳过阶段感知校验（误放行暴露，T-016 修复）；
+    调用方对默认值按各自 fail-safe 语义显式报错并披露更新指引。
+    """
+    match = re.search(r'-\s*\*\*当前阶段\*\*:\s*(.*)', content)
+    if not match:
+        return "", False
+    value = match.group(1).strip()
+    if "|" in value:
+        return "", True
+    token = re.match(r"[a-z-]+", value)
+    return (token.group(0) if token else ""), False
+
 def check_evidence_complete(task_file):
     """12. 证据链完整性: 校验开发完成后，任务文档中的测试结果和 lint 结果是否已填写勾选"""
     task_path = Path(task_file)
@@ -867,8 +887,13 @@ def check_evidence_complete(task_file):
     # 阶段感知：证据链在开发完成（code-review/close）后才强制校验。
     # init/plan-review/dev 期 3.2 复选框本应留空，提前勾选反而属于伪造证据；
     # 元数据缺失或未知阶段时维持强制（fail-safe），与 check_execution_channel_records 的阶段感知设计一致。
-    stage_match = re.search(r'-\s*\*\*当前阶段\*\*:\s*([a-z-]+)', content)
-    current_stage = stage_match.group(1).strip() if stage_match else ""
+    current_stage, stage_is_default = _parse_current_stage(content)
+    if stage_is_default:
+        return False, (
+            "🛑 当前阶段元数据仍为模板默认值（未更新），无法判定任务所处阶段，"
+            "按 fail-safe 强制校验 3.2 证据链；请更新任务元数据「当前阶段」"
+            "（取值：init/plan-review/dev/code-review/close）。"
+        )
     if current_stage in ("init", "plan-review", "dev"):
         return True, f"💡 提示：当前阶段为 {current_stage}，3.2 证据链尚未到期，跳过校验。"
 
@@ -931,8 +956,13 @@ def check_review_complete(task_file):
     # 阶段感知（T-015）：计划评审报告到 plan-review 才到期，代码评审报告到 code-review 才到期；
     # 早期阶段模板空节未填属预期，提前强制会误报阻断。元数据缺失或未知阶段维持强制（fail-safe），
     # 与 check_evidence_complete 的阶段感知设计一致。
-    stage_match = re.search(r'-\s*\*\*当前阶段\*\*:\s*([a-z-]+)', content)
-    current_stage = stage_match.group(1).strip() if stage_match else ""
+    current_stage, stage_is_default = _parse_current_stage(content)
+    if stage_is_default:
+        return False, (
+            "🛑 当前阶段元数据仍为模板默认值（未更新），无法判定任务所处阶段，"
+            "按 fail-safe 强制校验（2.1/4.1 均须写入有效审查报告）；请更新任务元数据「当前阶段」"
+            "（取值：init/plan-review/dev/code-review/close）。"
+        )
     if current_stage == "init":
         return True, "💡 提示：当前阶段为 init，2.1/4.1 盲审报告均未到期，跳过校验。"
     code_due = current_stage not in ("plan-review", "dev")
@@ -1075,8 +1105,14 @@ def check_execution_channel_records(task_file):
         risk_match = re.search(r'风险等级\s*[:：]\s*(L1|L2|L3)', content)
     risk_level = risk_match.group(1) if risk_match else "L2"
 
-    stage_match = re.search(r'-\s*\*\*当前阶段\*\*:\s*([a-z-]+)', content)
-    current_stage = stage_match.group(1).strip() if stage_match else "close"
+    current_stage, stage_is_default = _parse_current_stage(content)
+    if stage_is_default:
+        return False, (
+            "🛑 当前阶段元数据仍为模板默认值（未更新），无法判定已到达阶段；"
+            "请更新任务元数据「当前阶段」（取值：init/plan-review/dev/code-review/close）后重跑。"
+        )
+    if not current_stage:
+        current_stage = "close"
 
     stage_order = ["init", "plan-review", "dev", "code-review", "close"]
     if current_stage not in stage_order:
