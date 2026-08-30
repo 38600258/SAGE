@@ -29,7 +29,7 @@
 | `closer` | Main Agent | closer subagent | closer subagent | closer subagent | closer subagent | 注入式 closer → closer CLI → 人工确认后的 Main Agent fallback |
 
 > 项目可按工具能力覆盖默认通道，但不得绕过 TASK、角色提示词和质量门禁。
-> 若默认 subagent 未注册、无法启动、工具调用失败或无法产生 TASK/Git 有效产出，必须先复核 Git/TASK/进程/已有产出状态，记录失败现象和修复尝试，再按下一节降级链切换备选通道。
+> 任何重试、修复或切换通道之前，必须先复核 Git/TASK/进程/已有产出状态，确认「已经做了什么」并记录失败现象和修复尝试；若默认 subagent 未注册、无法启动、工具调用失败或无法产生 TASK/Git 有效产出，再按下一节降级链切换备选通道。
 
 ---
 
@@ -188,7 +188,7 @@ uv run python scripts/sage_dispatch.py provision --repo-root <repo> --adapter cl
 3. reviewer 不接收主线程讨论历史，只接收 TASK、角色提示词、diff 和证据链
 4. coder/closer 只能处理冻结 TASK 范围，不得重写 TASK 1.1~1.5
 5. closer 严禁执行 `git merge`、`git push`、部署命令
-6. fallback 不是执行者自选项；只有默认通道失败、已完成现场复核、已尝试修复、且人类明确处理或授权后，才允许切换到备选通道
+6. fallback 不是执行者自选项；任何重试、修复或切换通道之前必须先完成现场复核与修复尝试；只有默认通道失败、且人类明确处理或授权后，才允许切换到备选通道
 
 ---
 
