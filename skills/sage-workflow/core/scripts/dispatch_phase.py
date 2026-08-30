@@ -833,7 +833,7 @@ def doctor_probe(args: argparse.Namespace) -> dict[str, Any]:
             injected_available = True
             injected_note = (
                 f"isolation={injected.get('isolation', 'unknown')}；"
-                "每次派发前需人工授权，并在 TASK 证据链记录隔离等级"
+                "不要求逐次人工授权（T-018 裁决）；隔离等级须在 TASK 证据链记录"
             )
         except DispatchError as exc:
             injected_note = str(exc)

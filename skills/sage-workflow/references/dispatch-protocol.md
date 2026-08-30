@@ -63,7 +63,7 @@
 
 - `agent_types`：各阶段使用的通道标识（用于回执追踪，不要求宿主存在同名注册）。
 - `isolation`：隔离等级声明。`context-fresh` 表示全新上下文（模型级隔离取决于宿主当前模型与执行方差异）；`unknown` 表示宿主未声明隔离。
-- `requires_authorization`：为 `true` 时，Main Agent 派发前必须获得人工确认，并把隔离等级与授权记录写回 TASK 证据链。
+- `requires_authorization`：为 `true` 时，Main Agent 必须把隔离等级写回 TASK 证据链（可审计要求）；不要求逐次人工授权（T-018 裁决：人工确认点收敛为计划放行门、L3 每阶段人工确认与 merge/push/deploy 授权）。
 - `--channel auto` 的优先级为 subagent > injected > cli；从更高优先级通道降级 CLI 必须提供 `--fallback-reason` 与 `--fallback-authorized`。
 
 信封 `injection` 字段记录隔离信息；`action` 仍为 `spawn_subagent`，宿主用自身原生派发工具创建通用子代理并注入信封 `prompt`。跨宿主审查（审查方与执行方为不同宿主/模型家族）视为合法独立审查通道。

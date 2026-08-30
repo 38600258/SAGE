@@ -27,8 +27,8 @@
 | 等级 | 阶段链 | 子代理策略 | 门禁 |
 |------|--------|------------|------|
 | **L0** | Init → Dev → Close（无 TASK 文档，主代理直接执行） | 主代理直接执行，不派发子代理 | 最小验证 + 中文提交 |
-| **L1** | Init → Dev → Close | coder/closer 可选；reviewer 默认跳过 | 质量门禁必须执行 |
-| **L2** | Init → Plan Review → Dev → Code Review → Close | Main Agent 主线程规划；coder/closer 可子代理化；reviewer 独立 | 两次盲审 + 证据链 |
+| **L1** | Init → Dev → Close | coder/closer 可选；reviewer 默认跳过 | 计划放行（阶段 1 后）+ 质量门禁必须执行 |
+| **L2** | Init → Plan Review → 计划放行 → Dev → Code Review → Close | Main Agent 主线程规划；coder/closer 可子代理化；reviewer 独立 | 两次盲审 + 计划放行 + 证据链 |
 | **L3** | Init → Plan Review → Dev → Code Review → Close | 主代理控制流转，子代理只执行冻结任务 | 每阶段人工确认；部署需单独授权 |
 
 ### 3. 规划五阶段任务链
@@ -39,6 +39,8 @@
 阶段 1: 初始化（Main Agent 主线程规划，可参考 prompts/planner.md）
   ↓
 阶段 2: 计划评审（reviewer 角色）     ← L0/L1 跳过
+  ↓
+计划放行门（用户确认放行后才进 dev）  ← L0/L3 豁免；L1 在阶段 1 后、L2 在阶段 2 后
   ↓
 阶段 3: 编码实现（coder 角色）
   ↓
@@ -64,6 +66,7 @@
 📋 流水线：
   阶段 1 → 初始化 (Main Agent / planner 规范)
   阶段 2 → 计划评审 (reviewer)    ← L0/L1 已跳过
+  计划放行 → 用户确认放行         ← L0/L3 豁免；L1/L2 必经
   阶段 3 → 编码实现 (coder)
   阶段 4 → 代码审查 (reviewer)    ← L0/L1 已跳过
   阶段 5 → 收尾归档 (closer)
@@ -78,7 +81,7 @@
 
 - 必须明确输出每个阶段的角色、依赖关系和任务描述
 - 必须把最终 `TASK_LEVEL` 写入每个阶段描述；缺省判定必须标注“按 L2”
-- L0/L1 任务跳过阶段 2 和阶段 4，但需在输出中标注
+- L0/L1 任务跳过阶段 2 和阶段 4，但需在输出中标注；L1/L2 必须标注计划放行门（用户确认后才进 dev），L0/L3 标注豁免口径（L3 走每阶段人工确认）
 - L3 任务需在每个阶段描述中注入门禁指令
 
 ---

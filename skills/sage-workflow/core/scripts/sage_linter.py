@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SAGE 工作流检查器 (SAGE Linter)
 
-此脚本集成了方法论中要求的所有 16 个检查器，不依赖任何第三方 Python 库，
+此脚本集成了方法论中要求的所有 17 个检查器，不依赖任何第三方 Python 库，
 仅使用标准库及本地 git 命令。可以在任何智能体或人类开发流程中独立运行。
 
 SAGE = Steer, Agent Goes Execute (人类掌舵，智能体执行)
@@ -135,7 +135,7 @@ def get_file_lines(path):
 def _rule_id_from_label(label):
     """从检查器显示标签提取稳定规则 ID（SAGE-XX）
 
-    兼容两种标签形态：全量模式 "[10/16] 范围锁定校验" 与单项模式 "10. 范围锁定校验"。
+    兼容两种标签形态：全量模式 "[10/17] 范围锁定校验" 与单项模式 "10. 范围锁定校验"。
     无法解析编号时返回 None，输出侧降级为不标注规则 ID，不影响判定结果。
     """
     match = re.match(r"^(?:\[(\d+)/\d+\]|(\d+)[.、])", label.strip())
@@ -173,15 +173,23 @@ class ResultCollector:
         self.fmt = fmt              # "text" | "json" | "artifact"
         self.results = []
 
-    def add(self, checker_name, ok, message):
-        """添加一个检查结果。ok=True 且含 ⚠️ 时视为 warn，否则 pass/fail"""
+    def add(self, checker_name, ok, message, rule_id=None):
+        """添加一个检查结果。ok=True 且含 ⚠️ 时视为 warn，否则 pass/fail
+
+        rule_id 显式指定时优先于标签派生：用于标签编号与保留段冲突的检查器
+        （如计划放行 [17/17] 显式映射 SAGE-18——SAGE-17 为提交信息单项检查器
+        保留段，T-014 刻意保留；契约见 T-018 1.2 决策）。
+        """
         if ok and "⚠️" in message:
             status = "warn"
         elif ok:
             status = "pass"
         else:
             status = "fail"
-        self.results.append(CheckResult(checker_name, status, message, _rule_id_from_label(checker_name)))
+        self.results.append(CheckResult(
+            checker_name, status, message,
+            rule_id if rule_id is not None else _rule_id_from_label(checker_name),
+        ))
 
     @property
     def has_fail(self):
@@ -304,7 +312,7 @@ class ResultCollector:
 
 
 # ==============================================================================
-# 16 个检查器核心实现
+# 17 个检查器核心实现
 # ==============================================================================
 
 def check_template_copy(task_file, template_file):
@@ -1170,6 +1178,79 @@ def check_execution_channel_records(task_file):
     return True, f"阶段执行通道记录校验通过 (当前阶段: {current_stage}, 风险等级: {risk_level})"
 
 
+def _parse_plan_clearance(content: str) -> tuple[str, bool]:
+    """解析任务元数据「计划放行」（T-018 人类掌舵点，check_plan_clearance 专用）。
+
+    返回 (value, present)：value 为整行捕获的元数据值（strip 后），present 为标签行是否存在。
+    与 _parse_current_stage 不同：模板默认值「待放行」是该字段的合法初始值（新任务 init 期
+    尚未到放行时点），因此不设模板默认值标记；到期判定由调用方结合阶段与风险等级完成。
+    """
+    match = re.search(r'-\s*\*\*计划放行\*\*:\s*(.*)', content)
+    if not match:
+        return "", False
+    return match.group(1).strip(), True
+
+def check_plan_clearance(task_file):
+    """18. 计划放行校验: L1/L2 任务进入 dev 前必须已获用户明确放行（人类掌舵点，T-018）
+
+    编号口径：清单编号与 --check-task 场景 A 标签为 18.；--all 场景 B 标签为 [17/17]
+    （任务级注册序），经 ResultCollector.add 显式 rule_id 映射 SAGE-18。
+
+    判定矩阵（T-018 1.2 决策 4/5）：
+    - 到期：当前阶段 ∈ {dev, code-review, close}（或未知值 fail-safe）且风险等级 ∈ {L1, L2}
+      （或等级缺失 fail-safe 强制）
+    - 未到期：init / plan-review——放行请求按 planner.md 第 8 节时点尚未发生属预期
+    - 跳过：L0（不适用）；L3（每阶段人工确认已覆盖）；当前阶段为模板默认行——任务尚处
+      init 模板态，「计划放行: 待放行」是合法初始值，此时不存在进 dev 暴露（且模板默认
+      阶段会被 T-016 三个阶段感知检查器阻断，无逃逸路径）
+    - 放行记录判定：整行捕获（T-016 同款模式，不经 _parse_current_stage），以「已放行」
+      开头即通过；行缺失或其余值一律阻断，披露当前值与修复指引（AP-009：自述判定依据）。
+    """
+    task_path = Path(task_file)
+    if not task_path.exists():
+        return False, f"任务文档不存在: {task_file}"
+
+    content = "".join(get_file_lines(task_path))
+
+    risk_match = re.search(r'-\s*\*\*风险等级\*\*:\s*(L0|L1|L2|L3)', content)
+    if not risk_match:
+        risk_match = re.search(r'风险等级\s*[:：]\s*(L0|L1|L2|L3)', content)
+    risk_level = risk_match.group(1) if risk_match else "L2"
+
+    if risk_level == "L0":
+        return True, "L0 任务不适用计划放行门，跳过校验。"
+    if risk_level == "L3":
+        return True, "L3 任务由每阶段人工确认覆盖，跳过计划放行校验。"
+
+    current_stage, stage_is_default = _parse_current_stage(content)
+    if stage_is_default:
+        return True, (
+            "💡 提示：当前阶段元数据仍为模板默认值（任务尚处 init 模板态），"
+            "「计划放行: 待放行」为合法初始值，跳过校验；进入 dev 前必须完成计划放行"
+            "（planner.md 第 8 节五要素请求 + 用户三处置）。"
+        )
+    if current_stage in ("init", "plan-review"):
+        return True, f"💡 提示：当前阶段为 {current_stage}，计划放行尚未到期，跳过校验。"
+
+    # 到期（dev/code-review/close，未知阶段值按 fail-safe 强制）
+    value, present = _parse_plan_clearance(content)
+    if present and value.startswith("已放行"):
+        return True, "计划放行校验通过（元数据记录已放行）"
+    if not present:
+        return False, (
+            "🛑 任务已进入 dev 及之后阶段，但元数据缺失「计划放行」字段，按 fail-safe "
+            "强制要求放行记录；请按 planner.md 第 8 节向用户提交计划放行请求（五要素："
+            "目标概览/可写清单【范围增量标注】/自决清单/风险概览/盲审结论），获用户明确"
+            "「放行」后将元数据置为「已放行（用户确认，时间戳）」。代理不得代填放行记录。"
+        )
+    return False, (
+        f"🛑 任务已进入 dev 及之后阶段，但计划放行未完成（当前值：{value or '空'}）。"
+        "未获用户明确「放行」不得进入 dev 或派发 coder；请按 planner.md 第 8 节向用户"
+        "提交计划放行请求（五要素：目标概览/可写清单【范围增量标注】/自决清单/风险概览/"
+        "盲审结论），获用户明确「放行」后将元数据置为「已放行（用户确认，时间戳）」。"
+        "代理不得代填放行记录。"
+    )
+
 def check_unit_tests(tests_dir=None, timeout=600):
     """16. 单元测试执行: 以子进程真实执行 linter 同级 tests 目录的单测套件
 
@@ -1449,6 +1530,7 @@ def main():
             (lambda: check_review_complete(task_file), "13. 盲审结果校验"),
             (lambda: check_model_metadata(task_file), "14. 模型元数据校验"),
             (lambda: check_execution_channel_records(task_file), "15. 执行通道记录校验"),
+            (lambda: check_plan_clearance(task_file), "18. 计划放行校验"),
         ]
 
         for func, name in checkers:
@@ -1460,7 +1542,7 @@ def main():
             print()
 
     # ======================================================================
-    # 场景 B: 一键全量校验 (一键运行全部 16 个检查器)
+    # 场景 B: 一键全量校验 (一键运行全部 17 个检查器)
     # ======================================================================
     if args.all or not args.check_task:
         # 如果 check_task 已运行，需要一个新的收集器用于全量（或合并）
@@ -1483,57 +1565,60 @@ def main():
 
         # 1. 物理分支隔离校验
         ok, msg = check_git_branch_isolation(sage_root, args.allow_protected_branch)
-        collector.add("[4/16] 分支隔离校验", ok, msg)
+        collector.add("[4/17] 分支隔离校验", ok, msg)
 
         # 2. 模板守护校验
         if args.allow_template_changes:
             ok, msg = True, "模板变更已由 --allow-template-changes 显式允许"
         else:
             ok, msg = check_templates_pristine(templates_dir, sage_root)
-        collector.add("[7/16] 模板完整校验", ok, msg)
+        collector.add("[7/17] 模板完整校验", ok, msg)
 
         # 3. 只增不改日志校验
         ok, msg = check_append_only(decision_log_file, sage_root)
-        collector.add("[9/16] 日志增改限制", ok, msg)
+        collector.add("[9/17] 日志增改限制", ok, msg)
 
         # 4. CHANGELOG 联动更新校验
         ok, msg = check_changelog_update(changelog_file, sage_root)
-        collector.add("[8/16] 日志更新联动", ok, msg)
+        collector.add("[8/17] 日志更新联动", ok, msg)
 
         # 5. T2 规范体积校验
         ok, msg = check_t2_document_lines(docs_dir)
-        collector.add("[5/16] 规范文档体积", ok, msg)
+        collector.add("[5/17] 规范文档体积", ok, msg)
 
         # 6. 本地交叉引用验证 — 扫描整个项目根目录
         ok, msg = check_cross_links(sage_root)
-        collector.add("[11/16] 交叉引用校验", ok, msg)
+        collector.add("[11/17] 交叉引用校验", ok, msg)
 
         # 7. 文档新鲜度扫描 (警告级)
         ok, msg = check_document_freshness(docs_dir, args.stale_days)
-        collector.add("[6/16] 文档新鲜扫描", ok, msg)
+        collector.add("[6/17] 文档新鲜扫描", ok, msg)
 
         # [FIX DESIGN-3] 如果已通过 --check-task 单独校验过，不再重复执行任务级校验
         if task_file and not args.check_task:
             if args.format == "text":
                 print("\n--- 任务级细节深度扫描 ---")
             task_checkers = [
-                (lambda: check_template_copy(task_file, template_file), "[1/16] 模板复制校验"),
-                (lambda: check_task_structure(task_file), "[2/16] 任务大纲校验"),
-                (lambda: check_task_risk_sections(task_file), "[3/16] 风险扩展校验"),
-                (lambda: check_scope_lock(task_file, sage_root), "[10/16] 范围锁定校验"),
-                (lambda: check_evidence_complete(task_file), "[12/16] 证据链校验"),
-                (lambda: check_review_complete(task_file), "[13/16] 盲审结果校验"),
-                (lambda: check_model_metadata(task_file), "[14/16] 模型元数据校验"),
-                (lambda: check_execution_channel_records(task_file), "[15/16] 执行通道记录校验"),
+                (lambda: check_template_copy(task_file, template_file), "[1/17] 模板复制校验", None),
+                (lambda: check_task_structure(task_file), "[2/17] 任务大纲校验", None),
+                (lambda: check_task_risk_sections(task_file), "[3/17] 风险扩展校验", None),
+                (lambda: check_scope_lock(task_file, sage_root), "[10/17] 范围锁定校验", None),
+                (lambda: check_evidence_complete(task_file), "[12/17] 证据链校验", None),
+                (lambda: check_review_complete(task_file), "[13/17] 盲审结果校验", None),
+                (lambda: check_model_metadata(task_file), "[14/17] 模型元数据校验", None),
+                (lambda: check_execution_channel_records(task_file), "[15/17] 执行通道记录校验", None),
+                # 标签 [17/17] 显式映射 SAGE-18（SAGE-17 为提交信息单项检查器保留段，T-014）；
+                # 输出序号 [17/17] 先于 [16/17] 单元测试出现（task_checkers 块在单测之前执行）属注册序错位，CODE_WIKI 有备案
+                (lambda: check_plan_clearance(task_file), "[17/17] 计划放行校验", "SAGE-18"),
             ]
-            for func, name in task_checkers:
+            for func, name, rule_id in task_checkers:
                 ok, msg = func()
-                collector.add(name, ok, msg)
+                collector.add(name, ok, msg, rule_id=rule_id)
 
         # 8. 单元测试执行（TD-3：门禁从纯静态扫描升级为真实执行测试套件）
         # 无条件执行（不依赖活跃任务存在）；失败/超时 → 阻断（退出码 2）
         ok, msg = check_unit_tests(timeout=600)
-        collector.add("[16/16] 单元测试执行", ok, msg)
+        collector.add("[16/17] 单元测试执行", ok, msg)
 
         if args.format == "text":
             print("\n================================================================")

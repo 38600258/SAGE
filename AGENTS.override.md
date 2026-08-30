@@ -46,8 +46,8 @@
    | 等级 | 触发信号 | 阶段链 | 门禁 |
    |------|---------|--------|------|
    | L0 | 纯机械修正、格式化、极小文案修补 | Init → Dev → Close | 免 TASK；最小验证 + 中文提交 |
-   | L1 | 纯文档/纯测试/纯重构/不涉及外部系统 | Init → Dev → Close | 物理 TASK + 质量门禁 |
-   | L2 | 业务逻辑变更/新增功能/修复 Bug | Init → PlanReview → Dev → CodeReview → Close | 两次盲审 + 证据链 |
+   | L1 | 纯文档/纯测试/纯重构/不涉及外部系统 | Init → Dev → Close | 物理 TASK + 计划放行 + 质量门禁 |
+   | L2 | 业务逻辑变更/新增功能/修复 Bug | Init → PlanReview → 计划放行 → Dev → CodeReview → Close | 两次盲审 + 计划放行 + 证据链 |
    | L3 | 数据库 Schema 变更/外部 API 对接/部署配置 | Init → PlanReview → Dev → CodeReview → Close | 每阶段人工确认 |
 
 3. **阶段-角色映射**：L0 不适用本表；L1 及以上各阶段对应唯一角色契约与 TASK 输出章节。
@@ -62,7 +62,7 @@
 
 4. **角色契约**：`skills/sage-workflow/core/prompts/` 是项目内角色契约权威来源；SAGE skill 可内置 1.0 默认发行版用于 Standalone/bootstrap，本仓库默认直接使用 `skills/sage-workflow/core/`；bootstrap 到其他项目后，项目本地 `prompts/`、`templates/`、`docs/guides/` 可覆盖默认发行版，CLI/subagent 只能读取并承载当前权威版本。
 
-5. **子代理派发门禁**：L1 及以上，TASK 文档 1.1~1.5 冻结后，方可派发 coder/closer 等执行型子代理；派发时只传递必要定位信息（TASK 文档路径、角色提示词路径、阶段、仓库根目录），任务等级等调度信息以 TASK 元数据为准。L0 免除 TASK 文档，主代理直接执行，不派发 CLI/subagent。
+5. **子代理派发门禁**：L1 及以上，TASK 文档 1.1~1.5 冻结**且计划放行**（元数据「计划放行」=已放行；L0/L3 豁免，见 planner.md 第 8 节）后，方可派发 coder/closer 等执行型子代理；派发时只传递必要定位信息（TASK 文档路径、角色提示词路径、阶段、仓库根目录），任务等级等调度信息以 TASK 元数据为准。L0 免除 TASK 文档，主代理直接执行，不派发 CLI/subagent。
 
 6. **执行通道协议**：L1 及以上，CLI/subagent 通过 TASK 文档元数据（风险等级、当前阶段、项目根目录、功能分支）获取调度信息；不得传递主线程讨论历史或额外隐式上下文；具体 CLI 命令从 [execution-channels](skills/sage-workflow/core/guides/execution-channels.md) 读取，缺省按 L2；L1 及以上派发前先运行 Dispatcher 的 `prepare`，宿主原生能力由 Main Agent 调用，模型按 adapter 信封的 `request` / `agent-registration` 绑定传递或校验，完成后必须运行 `verify`。
 

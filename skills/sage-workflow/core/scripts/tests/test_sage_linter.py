@@ -618,5 +618,130 @@ class RuleIdAndDisclosureTests(unittest.TestCase):
         self.assertTrue(self.linter._is_meta_file(".sage/linter-runs.jsonl"))
 
 
+class CheckPlanClearanceTests(unittest.TestCase):
+    """check_plan_clearance 判定矩阵（T-018）：到期强制 / 早期跳过 / L0·L3 豁免 / fail-safe。"""
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.linter = load_linter()
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+        sys.modules.pop("sage_linter_under_test", None)
+
+    def write_task(self, risk: str | None, phase: str, clearance: str | None) -> Path:
+        """构造最小 TASK 文档；risk/clearance 传 None 表示缺失对应元数据行。"""
+        lines = ["# TASK\n\n", "- **任务编号 (ID)**: T-TEST\n"]
+        if risk is not None:
+            lines.append(f"- **风险等级**: {risk}\n")
+        lines.append(f"- **当前阶段**: {phase}\n")
+        if clearance is not None:
+            lines.append(f"- **计划放行**: {clearance}\n")
+        lines.append("- **项目根目录**: test\n- **功能分支**: feat/t-test\n")
+        task = Path(self.temp_dir.name) / "ACTIVE_TASK_T-TEST.md"
+        task.write_text("".join(lines), encoding="utf-8")
+        return task
+
+    def test_dev_pending_clearance_blocks_with_guidance(self) -> None:
+        task = self.write_task("L1", "dev", "待放行")
+        ok, msg = self.linter.check_plan_clearance(task)
+        self.assertFalse(ok)
+        self.assertIn("计划放行未完成", msg)
+        self.assertIn("已放行", msg)
+        self.assertIn("planner.md 第 8 节", msg)
+
+    def test_dev_cleared_passes(self) -> None:
+        task = self.write_task("L2", "dev", "已放行（用户确认，2026-08-31T01:23:42+08:00）")
+        ok, msg = self.linter.check_plan_clearance(task)
+        self.assertTrue(ok)
+
+    def test_early_stages_skip(self) -> None:
+        for stage in ("init", "plan-review"):
+            with self.subTest(stage=stage):
+                task = self.write_task("L2", stage, "待放行")
+                ok, msg = self.linter.check_plan_clearance(task)
+                self.assertTrue(ok)
+                self.assertIn("跳过", msg)
+
+    def test_l0_and_l3_exempt(self) -> None:
+        for risk in ("L0", "L3"):
+            with self.subTest(risk=risk):
+                task = self.write_task(risk, "dev", "待放行")
+                ok, msg = self.linter.check_plan_clearance(task)
+                self.assertTrue(ok)
+                self.assertIn("跳过", msg)
+
+    def test_close_stage_pending_blocks(self) -> None:
+        task = self.write_task("L2", "close", "待放行")
+        ok, _ = self.linter.check_plan_clearance(task)
+        self.assertFalse(ok)
+
+    def test_missing_field_failsafe_blocks(self) -> None:
+        task = self.write_task("L1", "dev", None)
+        ok, msg = self.linter.check_plan_clearance(task)
+        self.assertFalse(ok)
+        self.assertIn("缺失", msg)
+
+    def test_missing_risk_failsafe_enforces(self) -> None:
+        task = self.write_task(None, "dev", "待放行")
+        ok, _ = self.linter.check_plan_clearance(task)
+        self.assertFalse(ok)
+
+    def test_unknown_stage_failsafe_enforces(self) -> None:
+        task = self.write_task("L1", "unknown-stage", "待放行")
+        ok, _ = self.linter.check_plan_clearance(task)
+        self.assertFalse(ok)
+
+    def test_stage_template_default_skips(self) -> None:
+        """当前阶段为模板管道默认行时跳过（init 模板态「待放行」为合法初始值）。"""
+        task = Path(self.temp_dir.name) / "ACTIVE_TASK_T-TEST.md"
+        task.write_text(
+            "# TASK\n\n"
+            "- **任务编号 (ID)**: T-TEST\n"
+            "- **风险等级**: L2\n"
+            "- **当前阶段**: init | plan-review | dev | code-review | close\n"
+            "- **计划放行**: 待放行\n"
+            "- **项目根目录**: test\n"
+            "- **功能分支**: feat/t-test\n",
+            encoding="utf-8",
+        )
+        ok, msg = self.linter.check_plan_clearance(task)
+        self.assertTrue(ok)
+        self.assertIn("跳过", msg)
+
+
+class PlanClearanceRuleIdContractTests(unittest.TestCase):
+    """计划放行 rule ID 契约（T-018）：SAGE-18 显式映射、SAGE-01~17 零变化、全局唯一。"""
+
+    def setUp(self) -> None:
+        self.linter = load_linter()
+
+    def tearDown(self) -> None:
+        sys.modules.pop("sage_linter_under_test", None)
+
+    def test_explicit_rule_id_overrides_label_derivation(self) -> None:
+        collector = self.linter.ResultCollector(fmt="json")
+        collector.add("[17/17] 计划放行校验", False, "未放行", rule_id="SAGE-18")
+        self.assertEqual(collector.results[0].rule_id, "SAGE-18")
+
+    def test_scenario_a_label_derives_sage18(self) -> None:
+        self.assertEqual(self.linter._rule_id_from_label("18. 计划放行校验"), "SAGE-18")
+
+    def test_bare_label_17_derives_reserved_sage17(self) -> None:
+        """负向断言：[17/17] 裸派生即 SAGE-17（hook 保留段）——显式 rule_id 覆盖存在的理由。"""
+        self.assertEqual(self.linter._rule_id_from_label("[17/17] 计划放行校验"), "SAGE-17")
+
+    def test_all_labels_rule_ids_unique_and_sage17_reserved(self) -> None:
+        labels = [
+            "1.", "2.", "3.", "10.", "12.", "13.", "14.", "15.", "18.",  # 场景 A
+            "[4/17]", "[5/17]", "[6/17]", "[7/17]",
+            "[8/17]", "[9/17]", "[11/17]", "[16/17]",  # 场景 B 通用
+        ]
+        ids = [self.linter._rule_id_from_label(label) for label in labels]
+        self.assertTrue(all(ids))
+        self.assertEqual(len(ids), len(set(ids)), f"rule ID 重复: {ids}")
+        self.assertNotIn("SAGE-17", ids)
+
+
 if __name__ == "__main__":
     unittest.main()
