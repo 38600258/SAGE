@@ -96,7 +96,7 @@
 
 | 文件 | 定位 | 依赖 |
 |---|---|---|
-| `sage_linter.py` | 质量门禁（16 个检查器） | 仅 Python 标准库 + git |
+| `sage_linter.py` | 质量门禁（17 个检查器） | 仅 Python 标准库 + git |
 | `dispatch_phase.py` | 跨宿主阶段派发协议层 | 仅 Python 标准库 + git |
 | `bootstrap_sage.py` | 将默认发行版复制进新项目 | 仅 Python 标准库 + git |
 | `tests/test_dispatch_phase.py` | dispatch 的 `unittest` 测试 | unittest |
@@ -115,7 +115,7 @@
 
 ### 4.1 `sage_linter.py` — 质量门禁
 
-**作用**：集中了方法论要求的 **16 个检查器**，用于校验任务文档、分支隔离、提交信息、文档健康度等。
+**作用**：集中了方法论要求的 **17 个检查器**，用于校验任务文档、分支隔离、提交信息、文档健康度等。
 
 #### 全局常量
 
@@ -130,7 +130,7 @@
 | 函数 | 职责 |
 |---|---|
 | `_is_meta_file(filepath)` | 判定是否为工作流元文件（非项目源码） |
-| `_rule_id_from_label(label)` | 从检查器标签提取稳定规则 ID（SAGE-XX），兼容 `[N/16]` 与 `N.` 两种形态，不可解析返回 None |
+| `_rule_id_from_label(label)` | 从检查器标签提取稳定规则 ID（SAGE-XX），兼容 `[N/17]` 与 `N.` 两种形态，不可解析返回 None（`ResultCollector.add` 支持显式 rule_id 覆盖派生，用于保留段冲突） |
 | `write_run_log(...)` | 运行结果单行 JSON 追加至 `.sage/linter-runs.jsonl`（拦截频率统计；best-effort 不影响退出码；hook 模式仅记录存在 fail/warn 的运行） |
 | `run_git_cmd(args, cwd)` | 运行 git 命令，失败静默返回空串 |
 | `get_git_diff_files(cwd)` | 收集变更文件（已暂存+未暂存+未跟踪），兼容 porcelain 全状态码 |
@@ -150,7 +150,7 @@
 - 输出：`flush_text()` / `flush_json()` / `flush_artifact()`（Markdown 报告）/ `flush()`；fail/warn 在三种格式中统一携带 `[SAGE-XX]` 规则 ID（json 为独立 `rule_id` 字段）。
 - 启发式判定披露：风险扩展/盲审完整性/执行通道记录/模型元数据四个检查器的 fail 消息自述命中依据（命中的占位词、完整判定词表、要求的标题/行格式）；判定语义与词表内容不变（T-014）。
 
-#### 16 个检查器（模块的"大脑"）
+#### 17 个检查器（模块的"大脑"）
 
 | # | 函数 | 校验内容 |
 |---|---|---|
@@ -158,7 +158,7 @@
 | 2 | `check_task_structure` | 任务 5 阶段大节齐全有序 |
 | 3 | `check_task_risk_sections` | L2/L3 必须有 1.3a 验收标准（AC-ID 可证伪契约）+ 1.3b 风险矩阵 |
 | 4 | `check_git_branch_isolation` | 禁在受保护分支开发；分支名符合 `feat/t-XXX-*` 等规范 |
-| 17 | `check_commit_message` | Conventional Commit + 描述含中文（commit-msg 门禁核心；hook 专属检查器，编号 17 避免与 [15/16] 执行通道记录校验歧义） |
+| 17 | `check_commit_message` | Conventional Commit + 描述含中文（commit-msg 门禁核心；hook 专属检查器，编号 17 为 hook 保留段——任务级检查器 rule ID 不占用，计划放行标签 [17/17] 显式映射 SAGE-18 即此原因） |
 | 5 | `check_t2_document_lines` | guides 下规范文档 ≤500 行 |
 | 6 | `check_document_freshness` | 文档 ≤30 天未更新（警告级，不阻塞） |
 | 7 | `check_templates_pristine` | 模板目录被篡改即阻断 |
@@ -171,6 +171,7 @@
 | 14 | `check_model_metadata` | 任务元数据"使用模型"非占位符 |
 | 15 | `check_execution_channel_records` | L1+ 已到达阶段必须记录角色契约/执行通道/偏离（阶段解析经 `_parse_current_stage`——TD-9：元数据为模板默认值时阻断并披露） |
 | 16 | `check_unit_tests` | `--all` 场景以子进程真实执行单测套件（TD-3：失败/超时即阻断；无 tests 目录则跳过） |
+| 18 | `check_plan_clearance` | L1/L2 任务 dev 及之后必须元数据「计划放行」=已放行（T-018 人类掌舵点；阶段感知：init/plan-review 未到期、L0/L3 豁免、模板默认阶段跳过——「待放行」为合法初始值、缺失/未放行 fail-safe 阻断；解析经 `_parse_plan_clearance` 整行捕获。rule ID 契约：标签 [17/17] 显式映射 SAGE-18、场景 A 标 "18."，SAGE-17 为 hook 保留段；--all 输出序号 [17/17] 先于 [16/17] 单元测试出现（task_checkers 块在单测之前执行）属注册序错位，备案知悉） |
 
 #### 主入口 `main()`
 

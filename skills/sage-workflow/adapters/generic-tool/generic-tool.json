@@ -18,7 +18,7 @@
       "code-review": "sage_reviewer",
       "close": "sage_closer"
     },
-    "notes": "宿主无命名注册，派发时注入 ROLE_PROMPT；隔离等级为上下文级（模型级隔离取决于宿主当前模型与执行方差异），每次派发前需人工授权并在 TASK 证据链记录。"
+    "notes": "宿主无命名注册，派发时注入 ROLE_PROMPT；隔离等级为上下文级（模型级隔离取决于宿主当前模型与执行方差异），隔离等级须写回 TASK 证据链；不要求逐次人工授权（T-018 裁决：人工确认点收敛为计划放行门）。"
   },
   "models": {
     "plan-review": {

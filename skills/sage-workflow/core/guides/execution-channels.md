@@ -46,7 +46,7 @@
 
 降级链规则：
 
-1. **注入式通道要求授权**：`prepare` 信封 `injection.requires_authorization=true` 时，Main Agent 派发前必须获得人工确认，并把隔离等级（`injection.isolation`）写回 TASK 证据链，不得静默使用。
+1. **注入式通道使用要求**：`prepare` 信封 `injection.requires_authorization=true` 时，Main Agent 必须把隔离等级（`injection.isolation`）写回 TASK 证据链，不得静默使用；注入式盲审/coder/closer 派发**不要求逐次人工授权**（T-018 用户裁决：人工确认点收敛为计划放行门（planner.md 第 8 节）、L3 每阶段人工确认与 merge/push/deploy 授权）。
 2. **跨宿主审查是合法独立通道**：盲审隔离单位是"模型 + 上下文"，不是"同一宿主进程"。审查方与执行方为不同宿主或不同模型家族时，天然满足隔离要求，按注入式通道记录即可，不属于自审。
 3. **熔断条款**：独立审查通道（级别 1~3）对同一阶段累计失败 ≥3 次后，停止自动重试。合法出口只有三个：人类接管审查；人工授权级别 4 降级审查（TASK 中标注隔离等级与授权）；任务挂起并登记技术债。禁止伪造 OK/WARN/BLOCK。
 4. **探测前移**：L1 及以上任务进入 Init 前，应运行 `doctor` 探测通道可用性，避免任务推进到盲审门禁才发现通道不可用。
@@ -157,7 +157,7 @@ PHASE=close
 
 ### 5.4 注入式子代理（无命名注册的宿主）
 
-宿主提供通用子代理/后台任务但没有命名注册时，使用 `prepare --adapter generic-tool --channel injected`。Main Agent 用宿主原生派发工具创建通用子代理，把信封 `prompt` 作为任务指令；宿主在派发上下文中注入 ROLE_PROMPT。每次派发前需人工授权；隔离等级以信封 `injection.isolation` 为准并写回 TASK 证据链。
+宿主提供通用子代理/后台任务但没有命名注册时，使用 `prepare --adapter generic-tool --channel injected`。Main Agent 用宿主原生派发工具创建通用子代理，把信封 `prompt` 作为任务指令；宿主在派发上下文中注入 ROLE_PROMPT。隔离等级以信封 `injection.isolation` 为准并写回 TASK 证据链；不要求逐次人工授权（T-018 裁决：人工确认点见 planner.md 第 8 节计划放行门）。
 
 ### 5.5 CLI Fallback
 
