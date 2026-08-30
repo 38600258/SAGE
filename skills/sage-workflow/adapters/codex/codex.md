@@ -33,3 +33,9 @@ uv run python scripts/sage_dispatch.py verify --receipt <receipt> --format json
 
 - L1 及以上任务分支使用 `feat|fix|docs|chore|refactor/t-XXX-*`，不得使用工具名前缀。
 - 未经用户明确授权，不执行 merge、push 或 deploy。
+
+## 已知踩坑
+
+宿主/CLI 特定陷阱的官方沉淀位；新踩坑随任务收尾沉淀进本节（纳入内容卫生范围）。
+
+- 暂无记录。

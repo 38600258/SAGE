@@ -50,6 +50,8 @@ SAGE 1.0 将工作流封装为 `skills/sage-workflow/`：
    uv run python skills/sage-workflow/core/scripts/dispatch_phase.py capabilities --adapter codex
    ```
 
+> 命令执行口径：默认推荐 `uv run python`（uv 自动优先使用项目虚拟环境）；无 uv 环境时，优先运行项目虚拟环境中的 python（例如 `.venv`），没有项目虚拟环境再使用系统 python。SAGE 全部命令示例均按此口径执行。
+
 ## 目录结构
 
 | 路径 | 用途 |

@@ -38,3 +38,10 @@ uv run python scripts/sage_dispatch.py run-cli --receipt <receipt> --format json
 - CLI stdout、退出码或口头“完成”不能单独作为成功证据。
 - 成功必须体现在 TASK 对应章节和 Git 指纹/HEAD 中。
 - 失败后切换工具前，必须复核 Git 状态、TASK 内容、进程状态和已有产出。
+
+## 已知踩坑
+
+宿主/CLI 特定陷阱的官方沉淀位；新踩坑随任务收尾沉淀进本节（纳入内容卫生范围）。
+
+- **Qwen CLI：superpowers 残留**——卸载 superpowers extension 后仍出现 `using-superpowers [User]`，来源通常是用户级 `~/.qwen/skills/using-superpowers` 残留；需移走或清空用户级 skills 并重启 Qwen 会话。
+- **Qwen CLI（Windows）：printf stderr 噪声**——成功输出后可能附带 `'printf' is not recognized` 的内部脚本 stderr 噪声；调用前临时把 `C:\Program Files\Git\usr\bin` 追加到 `PATH` 可规避；退出码 0 且 TASK/Git 产出符合预期时，不应仅因附带 stderr 判定失败——成功判定回到「TASK/Git 产出为准」的既有原则。

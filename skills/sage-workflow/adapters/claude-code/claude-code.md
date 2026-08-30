@@ -46,3 +46,9 @@ uv run python scripts/sage_dispatch.py provision --repo-root D:\repo --adapter c
 
 - L1 及以上任务分支使用 `feat|fix|docs|chore|refactor/t-XXX-*`，不得使用工具名前缀。
 - 未经用户明确授权，不执行 merge、push 或 deploy。
+
+## 已知踩坑
+
+宿主/CLI 特定陷阱的官方沉淀位；新踩坑随任务收尾沉淀进本节（纳入内容卫生范围）。
+
+- **prompt 被吞（`--add-dir`）**——把 prompt 放在 `--add-dir` 之后会被 `--add-dir <directories...>` 可变参数吞掉，表现为 `Input must be provided either through stdin or as a prompt argument`；prompt 必须放在参数序列最前，或经 stdin 传入。

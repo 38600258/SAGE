@@ -46,6 +46,7 @@ uv run python <skill-root>/core/scripts/dispatch_phase.py verify --receipt <rece
 uv run python <skill-root>/core/scripts/dispatch_phase.py run-cli --receipt <receipt> --command-json '["agent-cli","--prompt","{prompt}"]'
 uv run python <skill-root>/core/scripts/dispatch_phase.py provision --adapter codex --target-dir <agents 目录>
 ```
+> 命令执行口径：默认推荐 `uv run python`（uv 自动优先使用项目虚拟环境）；无 uv 环境时，优先运行项目虚拟环境中的 python（例如 `.venv`），没有项目虚拟环境再使用系统 python——下同，全文命令示例均按此口径执行。
 
 - Codex 等原生宿主：`prepare` 输出 `spawn_subagent`、`sage_reviewer`/`sage_coder`/`sage_closer` 和最小上下文；Main Agent 必须用当前宿主的原生派发工具执行，不能只把信封打印给用户。
 - CLI 宿主：命令必须是 JSON 字符串数组，禁止 shell 拼接；CLI 输出只作为日志，成功必须由 `verify` 根据 TASK/Git 回执判定。
@@ -86,6 +87,7 @@ uv run python <skill-root>/core/scripts/dispatch_phase.py provision --adapter co
 - `core/scripts/bootstrap_sage.py` 仅作为 bootstrap 工具保留在 skill 目录，不复制到项目运行时文件；
 - `core/githooks/*` → `.githooks/*`；若目标是 Git 仓库且未配置 `core.hooksPath`，bootstrap 会自动设置为 `.githooks`；若已有配置则提示来源和路径并保持不变；使用 `--skip-hooks` 可显式跳过这一步。
 - `core/scripts/dispatch_phase.py` → `scripts/sage_dispatch.py`；`adapters/<id>/`（含 `<id>.json`、`<id>.md` 与子代理生成脚本 `provision.py`）整目录 → `docs/guides/execution-adapters/<id>/`，使 bootstrap 后项目可脱离 skill 目录运行派发协议与子代理生成。
+- `references/*` → `docs/guides/references/`：派发协议全文与路径注册表随 bootstrap 落盘，脱离 skill 目录处理信封字段、回执格式与路径查找争议时有据可查。
 
 完成 bootstrap 后，复制到项目中的本地文件成为该仓库的权威来源。Bootstrap 至少应同时带入角色契约、TASK 模板、任务/CHANGELOG/Git 规范、质量 linter 和提交 hooks；只复制 `SKILL.md` 不算完成。`--dry-run` 只预览文件复制和 hooks 配置，不修改仓库；非 Git 目录会提示并跳过 hooks 配置。
 

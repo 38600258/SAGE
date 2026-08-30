@@ -28,3 +28,9 @@
 4. 工具专用 UX 产物不进入 SAGE 权威链，除非项目明确将其版本化。
 5. 宿主没有原生 API 时，使用 `cli.json` 或项目 CLI adapter；Skill 不能凭空创建宿主未提供的子代理。
 6. 若宿主原生 API 支持请求级模型，在项目 adapter 中将 `subagent_binding` 设为 `request`；若模型固定在宿主注册，则设为 `agent-registration` 并保持 adapter 与注册配置同步。
+
+## 已知踩坑
+
+宿主/CLI 特定陷阱的官方沉淀位；新踩坑随任务收尾沉淀进本节（纳入内容卫生范围）。
+
+- 暂无记录。

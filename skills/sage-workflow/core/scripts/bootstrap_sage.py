@@ -93,6 +93,23 @@ def build_plan(repo_root: Path) -> list[tuple[Path, Path, str | None]]:
                 )
             )
 
+    # references/ 与 adapters 同为 SKILL.md「内置核心」承诺的可分发资产：派发协议全文
+    # 与路径注册表随 bootstrap 落盘，使项目脱离 skill 目录运行派发协议时有据可查。
+    # references/*.md 内无相对链接（T-019 实测），无需 transform。
+    references_root = SKILL_ROOT / "references"
+    if references_root.is_dir():
+        for source_file in sorted(references_root.rglob("*")):
+            if not source_file.is_file() or _is_build_artifact(source_file):
+                continue
+            relative = source_file.relative_to(references_root)
+            plan.append(
+                (
+                    source_file,
+                    repo_root / "docs" / "guides" / "references" / relative,
+                    None,
+                )
+            )
+
     for script_name, target_name in (
         ("sage_linter.py", "sage_linter.py"),
         ("dispatch_phase.py", "sage_dispatch.py"),

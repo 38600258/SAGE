@@ -73,7 +73,7 @@
 2. 分支从项目开发基线分支切出：L1+ 使用 `feat|fix|docs|chore|refactor/t-XXX-*`；L0 可用 `fix|docs|chore|style/l0-*`；禁止工具名前缀。
 3. reviewer/coder/closer 可交给原生 subagent 或 CLI；Codex app 默认先运行 `../scripts/dispatch_phase.py prepare`，再按执行通道调用原生 subagent，CLI 作为受控 fallback，完成后运行 `verify`。
 4. subagent/CLI Prompt 只提供 `REPO_ROOT`、`TASK_PATH`、`ROLE_PROMPT`、`PHASE` 等必要定位信息，并要求回写 TASK 对应章节；其他调度信息从 TASK 元数据读取。
-5. subagent/CLI 成功标准是 TASK/Git 状态出现有效产出；stdout、退出码或 subagent 回复不能单独作为依据。默认 subagent 不可用时，必须先复核现场并尝试修复；仍不可用时记录失败并切换 CLI fallback；CLI 也不可用时停止报告，由人类确认后才可改用 Main Agent fallback。
+5. subagent/CLI 成功标准是 TASK/Git 状态出现有效产出；stdout、退出码或 subagent 回复不能单独作为依据。任何重试、修复或切换通道之前，必须先复核现场（Git/TASK/进程/已有产出）并尝试修复；默认 subagent 仍不可用时记录失败并切换 CLI fallback；CLI 也不可用时停止报告，由人类确认后才可改用 Main Agent fallback。
 6. `base_instructions`、`model_messages` 和 subagent 配置只属于载体提示层，不得复制项目化角色契约或任务事实；SAGE skill 内置默认发行版除外，但项目本地覆盖始终优先。模型身份与路由以 provider/shim 请求日志为准。
 7. Codex hooks 只作软防护；提交/推送前硬门禁以 Git hooks 和 `scripts/sage_linter.py` 为准。
 8. 越权命令、部署、外部网络或写出工作区，必须通过 Codex app 审批。
