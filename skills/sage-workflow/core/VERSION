@@ -1,5 +1,5 @@
-version: 1.5.3
+version: 1.5.4
 baseline_commit: 7589a91
-release_date: 2026-08-30
+release_date: 2026-08-31
 source: sage
 mode: default-distribution
