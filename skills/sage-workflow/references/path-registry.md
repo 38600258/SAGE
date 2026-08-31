@@ -5,7 +5,7 @@
 | 用途 | 项目覆盖路径 | 内置默认路径 |
 |------|--------------|--------------|
 | 触发入口 | 工具加载的 skill `SKILL.md` | 当前 skill 的 `SKILL.md` |
-| 项目入口 | `AGENTS.override.md`、`AGENTS.md`、工具入口文件 | `core/entry/AGENTS.override.md`、`core/entry/AGENTS.md`、`core/entry/GEMINI.md` |
+| 项目入口 | `AGENTS.md` | `core/entry/AGENTS.md` |
 | Orchestrator | `prompts/orchestrator.md` | `core/prompts/orchestrator.md` |
 | Planner | `prompts/planner.md` | `core/prompts/planner.md` |
 | Reviewer | `prompts/reviewer.md` | `core/prompts/reviewer.md` |
@@ -24,7 +24,7 @@
 | 阶段派发器 | `scripts/sage_dispatch.py` | `core/scripts/dispatch_phase.py` |
 | 执行 adapter | `docs/guides/execution-adapters/<id>/<id>.json` | `adapters/<id>/<id>.json` |
 | 子代理生成脚本 | `docs/guides/execution-adapters/<id>/provision.py` | `adapters/<id>/provision.py` |
-| 派发协议 | 项目执行通道指南 | `references/dispatch-protocol.md` |
+| 派发协议 | `docs/guides/references/dispatch-protocol.md` | `references/dispatch-protocol.md` |
 | Bootstrap 工具 | skill 提供的 bootstrap 命令 | `core/scripts/bootstrap_sage.py` |
 | 提交 hooks | `.githooks/*` | `core/githooks/*` |
 | 编程方法论 | 项目方法论文档 | `core/methodology/智能体优先的自主编程方法论.md` |

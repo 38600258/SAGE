@@ -29,6 +29,7 @@
 | `closer` | Main Agent | closer subagent | closer subagent | closer subagent | closer subagent | 注入式 closer → closer CLI → 人工确认后的 Main Agent fallback |
 
 > 项目可按工具能力覆盖默认通道，但不得绕过 TASK、角色提示词和质量门禁。
+> research subagent 仅做调研/草拟，以 `Workspace: inherit` 运行（继承当前工作区），不进入 reviewer/coder/closer 的阶段派发链。
 > 任何重试、修复或切换通道之前，必须先复核 Git/TASK/进程/已有产出状态，确认「已经做了什么」并记录失败现象和修复尝试；若默认 subagent 未注册、无法启动、工具调用失败或无法产生 TASK/Git 有效产出，再按下一节降级链切换备选通道。
 
 ---

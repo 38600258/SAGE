@@ -81,8 +81,8 @@ Reviewer 执行载体应直接写回 TASK 文档：计划盲审写入 2.1 节，
 
 | 工具 | 主流程 | 盲审首选 | 盲审备选 | 覆盖文件 |
 |------|--------|----------|----------|----------|
-| Antigravity | UI 主 agent + subagent/CLI | 执行通道配置 | reviewer CLI | `GEMINI.md` |
-| Codex app | Codex 主会话 + SAGE subagent | 执行通道配置 | CLI fallback | `AGENTS.override.md` |
+| Antigravity | UI 主 agent + subagent/CLI | 执行通道配置 | reviewer CLI | `AGENTS.md` |
+| Codex app | Codex 主会话 + SAGE subagent | 执行通道配置 | CLI fallback | `AGENTS.md` |
 
 ---
 

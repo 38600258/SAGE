@@ -121,7 +121,7 @@ def build_plan(repo_root: Path) -> list[tuple[Path, Path, str | None]]:
         test_source = CORE_ROOT / "scripts" / "tests" / test_name
         if test_source.is_file():
             plan.append((test_source, repo_root / "scripts" / "tests" / test_name, None))
-    for name in ("AGENTS.md", "AGENTS.override.md", "GEMINI.md"):
+    for name in ("AGENTS.md",):
         plan.append((CORE_ROOT / "entry" / name, repo_root / name, "entry"))
     return plan
 

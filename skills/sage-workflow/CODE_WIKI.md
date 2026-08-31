@@ -66,7 +66,7 @@
 
 | 路径 | 类型 | 职责 |
 |---|---|---|
-| `AGENTS.md` / `AGENTS.override.md` / `GEMINI.md` | 入口 | 工具无关 / Codex / Antigravity 入口规则 |
+| `AGENTS.md` | 入口 | 工具无关 SAGE 入口规则 |
 | `ARCHITECTURE.md` | 文档 | 顶层架构地图 |
 | `CHANGELOG.md` | 文档 | 只增不改的变更日志（Keep a Changelog） |
 | `README.md` | 文档 | 产品定位与快速开始 |
@@ -74,7 +74,7 @@
 | `docs/references/` | 参考 | 外部参考文章与 API 模板 |
 | `skills/sage-workflow/SKILL.md` | 入口 | skill 触发、模式选择、启动流程、红线 |
 | `skills/sage-workflow/core/VERSION` | 元数据 | 发行版本 + 基线提交同步锚点 |
-| `skills/sage-workflow/core/entry/` | 规范 | 默认入口文件（AGENTS* / GEMINI） |
+| `skills/sage-workflow/core/entry/` | 规范 | 默认入口文件（AGENTS.md） |
 | `skills/sage-workflow/core/prompts/` | 规范 | 6 个角色契约默认发行版 |
 | `skills/sage-workflow/core/templates/` | 规范 | TASK / ADR / PRD 物理复制模板 |
 | `skills/sage-workflow/core/guides/` | 规范 | 开发/任务/CHANGELOG/Git/执行通道/模型选择等规范 |

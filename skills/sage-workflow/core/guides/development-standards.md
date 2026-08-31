@@ -19,6 +19,14 @@
 4. 真理同步 → 更新 CHANGELOG、任务看板、相关文档
 ```
 
+### 1.2 载体提示层不承载契约
+
+宿主载体提示层（`base_instructions`、`model_messages`、系统/全局提示、artifact/plan view/walkthrough 等展示与路由面）只做展示与路由，不得复制角色契约或任务事实；角色契约与任务事实的权威在仓库内角色 prompt 与 TASK 文档。SAGE skill 内置默认发行版除外，项目本地覆盖始终优先。
+
+### 1.3 软防护与硬门禁分层
+
+宿主 hooks、审批弹窗与权限开关是软防护与授权面，可能因配置差异失效或被绕过；提交/推送前的硬门禁以 Git hooks 与 `sage_linter.py` 为准。文件写入后可运行 `uv run python skills/sage-workflow/core/scripts/sage_linter.py --check-scope` 做范围锁定自检，阶段退出前仍以 `--all` 全量门禁为准。
+
 ---
 
 ## 二、项目架构

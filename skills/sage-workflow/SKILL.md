@@ -10,7 +10,7 @@ SAGE 是一套智能体优先开发工作流。本 skill 封装 SAGE 1.0 默认�
 ## 运行模式
 
 1. **项目覆盖模式**：目标仓库已有 `AGENTS.md`、`prompts/`、`templates/` 或 `docs/guides/` 时，这些项目本地文件就是该项目权威来源。
-2. **独立启动模式**：目标仓库没有本地 SAGE 文件时，先按工具类型加载 `core/entry/AGENTS.override.md`、`core/entry/AGENTS.md` 或 `core/entry/GEMINI.md`，再使用 `core/` 文件作为默认权威来源，并将其 bootstrap 到项目仓库。
+2. **独立启动模式**：目标仓库没有本地 SAGE 文件时，先加载 `core/entry/AGENTS.md`，再使用 `core/` 文件作为默认权威来源，并将其 bootstrap 到项目仓库。
 3. **迁移升级模式**：升级 SAGE 本身时，对照 `core/VERSION` 比较项目文件与内置默认发行版，显式更新 docs/templates/prompts。
 
 若内置 core 规则与项目本地规则冲突，项目本地规则对该项目优先。内置 core 是默认发行版，不是静默覆盖层。
@@ -18,7 +18,7 @@ SAGE 是一套智能体优先开发工作流。本 skill 封装 SAGE 1.0 默认�
 ## 启动流程
 
 1. 从用户请求或当前工作区定位 `REPO_ROOT`。
-2. 按顺序检查项目本地入口：`AGENTS.override.md`、`AGENTS.md`、工具专用入口文件；都不存在时，回退到 `core/entry/` 中对应的默认入口。
+2. 按顺序检查项目本地入口：`AGENTS.md`；不存在时，回退到 `core/entry/AGENTS.md`。
 3. 加载当前有效入口文件，并加载 `prompts/orchestrator.md` 与 `prompts/planner.md`；独立启动模式下使用 `core/entry/` 与 `core/prompts/` 中的对应文件。
 4. 判定 `TASK_LEVEL`：L0/L1/L2/L3；缺失或不确定时按 L2。
 5. L1 及以上必须先物理复制当前有效的 `TASK-TEMPLATE.md` 到活跃任务路径，再填写内容。
@@ -60,7 +60,7 @@ uv run python <skill-root>/core/scripts/dispatch_phase.py provision --adapter co
 ## 内置核心
 
 - `core/VERSION`：SAGE 发行版本与基线同步锚点。
-- `core/entry/`：通用、Codex、Antigravity/Gemini 类工具的默认入口文件。
+- `core/entry/`：通用默认入口文件（`AGENTS.md`）。
 - `core/prompts/`：orchestrator、planner、reviewer、coder、closer、doc-gardener 的默认角色契约。
 - `core/templates/`：TASK、ADR、PRD 默认模板。
 - `core/guides/`：工作流默认操作指南，包含任务文档、CHANGELOG、Git、执行通道和开发规范。
@@ -82,7 +82,7 @@ uv run python <skill-root>/core/scripts/dispatch_phase.py provision --adapter co
 - `core/templates/*` → `templates/`
 - `core/guides/*` → `docs/guides/`
 - `core/methodology/*` → 项目方法论文档位置
-- `core/entry/AGENTS.md`、`core/entry/AGENTS.override.md`、`core/entry/GEMINI.md` → 项目对应入口文件
+- `core/entry/AGENTS.md` → 项目 `AGENTS.md` 入口文件
 - `core/scripts/sage_linter.py` → `scripts/sage_linter.py`
 - `core/scripts/bootstrap_sage.py` 仅作为 bootstrap 工具保留在 skill 目录，不复制到项目运行时文件；
 - `core/githooks/*` → `.githooks/*`；若目标是 Git 仓库且未配置 `core.hooksPath`，bootstrap 会自动设置为 `.githooks`；若已有配置则提示来源和路径并保持不变；使用 `--skip-hooks` 可显式跳过这一步。
