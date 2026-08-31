@@ -651,12 +651,25 @@ def check_templates_pristine(templates_dir, cwd=None):
         msg = "🛑 警告：检测到模板文件被非法修改！模板是神圣不可侵犯的，请撤销更改：\n"
         for f in changed:
             msg += f"  - {f}\n"
+        # AP-009 披露：报错须自述出路——披露豁免参数与适用条件，
+        # 避免模板升级类任务的执行者误回滚合法交付物（T-018 计划盲审实证的返工诱因，T-015 先例）
+        msg += (
+            "若交付物本身即模板变更的任务，可在开发期使用 --allow-template-changes 参数"
+            "豁免本项校验，并须在任务文档中记录豁免理由。"
+        )
         return False, msg
 
     return True, "模板完整性校验通过 (模板文件未被篡改)"
 
-def check_changelog_update(changelog_file, cwd=None):
-    """8. CHANGELOG 更新校验: 检查发生代码变更时，CHANGELOG.md 是否有对应修改"""
+def check_changelog_update(changelog_file, cwd=None, task_file=None):
+    """8. CHANGELOG 更新校验: 检查发生代码变更时，CHANGELOG.md 是否有对应修改
+
+    阶段感知（T-021）：CHANGELOG 回填是收尾期（close）动作（closer 契约将「更新 CHANGELOG」
+    划归阶段 5 归档职责），init/plan-review/dev/code-review 期该产出本不应存在，此时强制属
+    「拦截位置写错」的阶段预期拦截；close 期维持既有强制判定。task_file=None（向后兼容）或
+    TASK 文件不存在、元数据缺失/未知阶段值/模板默认行时，按 fail-safe 退回既有强制行为（最严侧），
+    与 check_evidence_complete 的阶段感知设计同构（复用 _parse_current_stage 单一解析点）。
+    """
     changelog_path = Path(changelog_file)
     if not changelog_path.exists():
         return True, "CHANGELOG.md 不存在，跳过更新校验。"
@@ -664,6 +677,35 @@ def check_changelog_update(changelog_file, cwd=None):
     changed_files = get_git_diff_files(cwd)
     if not changed_files:
         return True, "无任何文件变更，无需校验 CHANGELOG 更新。"
+
+    # 阶段感知判定：置于「无文件变更早退」之后、既有强制判定之前，
+    # 使 close 期真实变更路径完整保留（close 落入下方原有逻辑）。
+    if task_file is not None:
+        task_path = Path(task_file)
+        if task_path.exists():
+            content = "".join(get_file_lines(task_path))
+            current_stage, stage_is_default = _parse_current_stage(content)
+            if stage_is_default:
+                # 模板默认行（未随任务推进更新）：无法判定阶段，fail-safe 强制并披露判定依据（AP-009）
+                return False, (
+                    "🛑 当前阶段元数据仍为模板默认值（未更新），无法判定任务所处阶段，"
+                    "按 fail-safe 强制校验 CHANGELOG 更新；请更新任务元数据「当前阶段」"
+                    "（取值：init/plan-review/dev/code-review/close）。"
+                )
+            if current_stage in ("init", "plan-review", "dev", "code-review"):
+                # CHANGELOG 回填未到期：绿色通过 + 一行状态说明（非阻断、非警告、无动作要求）
+                return True, (
+                    f"💡 提示：当前阶段为 {current_stage}，CHANGELOG 更新回填属收尾期"
+                    f"（close）动作，尚未到期，跳过校验。"
+                )
+            if current_stage != "close":
+                # 元数据缺失（空值）或未知阶段值：无法判定阶段，fail-safe 强制并回显实际值（AP-009）
+                return False, (
+                    f"🛑 当前阶段元数据无法识别（当前阶段: {current_stage or '<缺失>'}），"
+                    "无法判定任务所处阶段，按 fail-safe 强制校验 CHANGELOG 更新；"
+                    "请更新任务元数据「当前阶段」（取值：init/plan-review/dev/code-review/close）。"
+                )
+        # task_file 指向的文件不存在：退化为既有强制行为（fail-safe 最严侧）
 
     # [FIX BUG-5] 使用统一的 _is_meta_file 判定，而非硬编码不完整的排除列表
     has_code_change = False
@@ -1578,8 +1620,10 @@ def main():
         ok, msg = check_append_only(decision_log_file, sage_root)
         collector.add("[9/17] 日志增改限制", ok, msg)
 
-        # 4. CHANGELOG 联动更新校验
-        ok, msg = check_changelog_update(changelog_file, sage_root)
+        # 4. CHANGELOG 联动更新校验（T-021：透传活跃任务文档启用阶段感知——
+        #    init/plan-review/dev/code-review 未到期跳过，close 维持强制；无活跃任务时
+        #    task_file=None 退化为既有强制行为）
+        ok, msg = check_changelog_update(changelog_file, sage_root, task_file=task_file)
         collector.add("[8/17] 日志更新联动", ok, msg)
 
         # 5. T2 规范体积校验

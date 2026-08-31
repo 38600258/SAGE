@@ -710,6 +710,138 @@ class CheckPlanClearanceTests(unittest.TestCase):
         self.assertIn("跳过", msg)
 
 
+class CheckChangelogUpdateStageTests(unittest.TestCase):
+    """check_changelog_update 阶段感知三态（T-021）：早期阶段跳过 / close 强制 / fail-safe 维持强制。
+
+    「有代码变更」分支依赖 git 工作区：临时目录内 git init 构造最小仓——
+    CHANGELOG.md 先提交使其被跟踪且无变更，再放一个未跟踪代码文件 app.py 构成代码变更，
+    此时 CHANGELOG 不在变更列表即应触发联动判定。
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.linter = load_linter()
+        self.repo = Path(self.temp_dir.name)
+        # 最小 git 仓：CHANGELOG.md 入库（被跟踪、无变更），app.py 未跟踪即代码变更
+        self.linter.run_git_cmd(["init"], cwd=self.repo)
+        self.linter.run_git_cmd(["config", "user.email", "test@example.com"], cwd=self.repo)
+        self.linter.run_git_cmd(["config", "user.name", "tester"], cwd=self.repo)
+        (self.repo / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
+        self.linter.run_git_cmd(["add", "CHANGELOG.md"], cwd=self.repo)
+        self.linter.run_git_cmd(["commit", "-m", "init"], cwd=self.repo)
+        (self.repo / "app.py").write_text("print('code change')\n", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+        sys.modules.pop("sage_linter_under_test", None)
+
+    def write_task(self, phase_line: str) -> Path:
+        """构造最小 TASK 文档；phase_line 传空串表示缺失"当前阶段"元数据。"""
+        metadata = f"- **当前阶段**: {phase_line}\n" if phase_line else ""
+        task = self.repo / "ACTIVE_TASK_T-TEST.md"
+        task.write_text(
+            "# TASK\n\n"
+            "- **任务编号 (ID)**: T-TEST\n"
+            "- **风险等级**: L2\n"
+            f"{metadata}"
+            "- **项目根目录**: test\n"
+            "- **功能分支**: feat/t-test\n",
+            encoding="utf-8",
+        )
+        return task
+
+    def test_early_stages_skip_changelog_check(self) -> None:
+        # CHANGELOG 回填属 close 期动作：init/plan-review/dev/code-review 未到期，跳过且不阻断
+        for stage in ("init", "plan-review", "dev", "code-review"):
+            with self.subTest(stage=stage):
+                task = self.write_task(stage)
+                ok, msg = self.linter.check_changelog_update(
+                    self.repo / "CHANGELOG.md", cwd=self.repo, task_file=task
+                )
+                self.assertTrue(ok)
+                self.assertIn("未到期", msg)
+                self.assertIn(stage, msg)
+
+    def test_close_stage_blocks_when_changelog_not_updated(self) -> None:
+        # close 期有代码变更且 CHANGELOG 未更新：维持既有强制阻断
+        task = self.write_task("close")
+        ok, msg = self.linter.check_changelog_update(
+            self.repo / "CHANGELOG.md", cwd=self.repo, task_file=task
+        )
+        self.assertFalse(ok)
+        self.assertIn("未进行同步更新", msg)
+
+    def test_task_file_none_enforces(self) -> None:
+        # task_file=None（向后兼容）：退化为既有强制行为（fail-safe 最严侧）
+        ok, msg = self.linter.check_changelog_update(self.repo / "CHANGELOG.md", cwd=self.repo)
+        self.assertFalse(ok)
+        self.assertIn("未进行同步更新", msg)
+
+    def test_missing_stage_metadata_enforces(self) -> None:
+        # 元数据「当前阶段」行缺失：无法判定阶段，fail-safe 强制并披露判定依据
+        task = self.write_task("")
+        ok, msg = self.linter.check_changelog_update(
+            self.repo / "CHANGELOG.md", cwd=self.repo, task_file=task
+        )
+        self.assertFalse(ok)
+        self.assertIn("当前阶段", msg)
+        self.assertIn("fail-safe", msg)
+
+    def test_unknown_stage_value_enforces(self) -> None:
+        # 未知阶段值：无法判定阶段，fail-safe 强制且消息回显实际值（AP-009）
+        task = self.write_task("unknown-stage")
+        ok, msg = self.linter.check_changelog_update(
+            self.repo / "CHANGELOG.md", cwd=self.repo, task_file=task
+        )
+        self.assertFalse(ok)
+        self.assertIn("unknown-stage", msg)
+        self.assertIn("fail-safe", msg)
+
+    def test_stage_template_default_enforces(self) -> None:
+        # 模板管道默认行（未更新）：不得被误判为 init 跳过，fail-safe 强制并披露（TD-9 同源）
+        task = self.write_task("init | plan-review | dev | code-review | close")
+        ok, msg = self.linter.check_changelog_update(
+            self.repo / "CHANGELOG.md", cwd=self.repo, task_file=task
+        )
+        self.assertFalse(ok)
+        self.assertIn("模板默认值", msg)
+
+
+class CheckTemplatesPristineDisclosureTests(unittest.TestCase):
+    """check_templates_pristine 阻断消息豁免参数披露（T-021 / AP-009）：判定语义零变化。"""
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.linter = load_linter()
+        self.repo = Path(self.temp_dir.name)
+        # 最小 git 仓：templates/ 入库，使后续工作区改动能被 git diff 捕获
+        self.linter.run_git_cmd(["init"], cwd=self.repo)
+        self.linter.run_git_cmd(["config", "user.email", "test@example.com"], cwd=self.repo)
+        self.linter.run_git_cmd(["config", "user.name", "tester"], cwd=self.repo)
+        self.templates = self.repo / "templates"
+        self.templates.mkdir()
+        (self.templates / "TASK-TEMPLATE.md").write_text("# 模板原文\n", encoding="utf-8")
+        self.linter.run_git_cmd(["add", "."], cwd=self.repo)
+        self.linter.run_git_cmd(["commit", "-m", "init"], cwd=self.repo)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+        sys.modules.pop("sage_linter_under_test", None)
+
+    def test_untouched_templates_pass(self) -> None:
+        # 判定语义零变化（改前行为）：模板未改 → 通过
+        ok, msg = self.linter.check_templates_pristine(self.templates, self.repo)
+        self.assertTrue(ok, msg)
+
+    def test_modified_template_blocks_with_allow_param_disclosure(self) -> None:
+        # 判定语义零变化（改前行为）：模板已改 → 阻断；阻断消息须披露豁免参数与适用条件
+        (self.templates / "TASK-TEMPLATE.md").write_text("# 模板被篡改\n", encoding="utf-8")
+        ok, msg = self.linter.check_templates_pristine(self.templates, self.repo)
+        self.assertFalse(ok)
+        self.assertIn("--allow-template-changes", msg)
+        self.assertIn("撤销更改", msg)
+
+
 class PlanClearanceRuleIdContractTests(unittest.TestCase):
     """计划放行 rule ID 契约（T-018）：SAGE-18 显式映射、SAGE-01~17 零变化、全局唯一。"""
 

@@ -162,7 +162,7 @@
 | 5 | `check_t2_document_lines` | guides 下规范文档 ≤500 行 |
 | 6 | `check_document_freshness` | 文档 ≤30 天未更新（警告级，不阻塞） |
 | 7 | `check_templates_pristine` | 模板目录被篡改即阻断 |
-| 8 | `check_changelog_update` | 有代码变更时 CHANGELOG 必须同步 |
+| 8 | `check_changelog_update` | 有代码变更时 CHANGELOG 必须同步（阶段感知：CHANGELOG 回填属 close 期动作——closer 契约阶段 5 职责，init/plan-review/dev/code-review 输出未到期说明跳过；close 维持强制；task_file=None/TASK 文件缺失/元数据缺失/未知值/模板默认行 fail-safe 强制——T-021，解析经 `_parse_current_stage`） |
 | 9 | `check_append_only` | 决策/变更日志只增不改（区分真实删除与换行误报） |
 | 10 | `check_scope_lock` | 实际改动文件落在 TASK 1.4 Writeable 白名单 |
 | 11 | `check_cross_links` | 本地 md 相对链接有效 |
