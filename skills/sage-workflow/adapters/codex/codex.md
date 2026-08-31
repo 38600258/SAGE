@@ -4,9 +4,14 @@
 
 ## 入口加载
 
-- 项目存在 `AGENTS.override.md` 时优先加载，因为 Codex 可能将其作为项目入口。
+- Codex 以项目根 `AGENTS.md` 作为项目入口（工具专属覆盖入口机制已退役，删除后 Codex 回落读取 `AGENTS.md`）。
 - 若目标项目只有内置 core，在规划前加载 `core/prompts/orchestrator.md` 与 `core/prompts/planner.md`。
 - Codex 的 plan 工具只向用户展示执行进度；持久事实仍以 TASK 文档为准。
+
+## 载体分层与审批边界
+
+- `base_instructions`、`model_messages` 与 subagent 配置只属于载体提示层，不得复制项目化角色契约或任务事实（通用原则见 development-standards.md）；项目本地覆盖始终优先，模型身份与路由以 provider/shim 请求日志为准。
+- 越权命令、部署、外部网络或写出工作区，必须通过 Codex app 审批；hooks 只作软防护，提交/推送前硬门禁以 Git hooks 与 `sage_linter.py` 为准。
 
 ## 自动派发
 

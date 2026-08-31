@@ -4,7 +4,7 @@
 
 ## 入口加载
 
-- 项目存在 `AGENTS.override.md` 时优先加载；Claude Code 以 `AGENTS.md` / `CLAUDE.md` 作为项目入口。
+- Claude Code 以项目根 `AGENTS.md`（或 `CLAUDE.md`）作为项目入口。
 - 若目标项目只有内置 core，在规划前加载 `core/prompts/orchestrator.md` 与 `core/prompts/planner.md`。
 - 持久事实仍以 TASK 文档为准，不依赖会话内存。
 

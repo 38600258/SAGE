@@ -48,7 +48,7 @@ from pathlib import Path
 # .sage/ 为 linter 自身运行日志目录，避免门禁产物被误判为项目源码
 _META_PREFIXES = (".sage/", "docs/", "templates/", "archive/", "scripts/", "prompts/")
 _META_EXACT = {
-    "AGENTS.md", "AGENTS.override.md", "ARCHITECTURE.md", "CHANGELOG.md", "GEMINI.md",
+    "AGENTS.md", "ARCHITECTURE.md", "CHANGELOG.md",
     ".gitignore", ".env", ".editorconfig",
 }
 

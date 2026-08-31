@@ -20,16 +20,16 @@
 - `REQUIREMENT`: 需求描述
 - `TASK_LEVEL`: 任务等级（可选；缺失时由编排器判定，仍不确定则按 L2）
 
-> 风险分级表见 AGENTS.md 任务入口规则第2条；本文件不再重复。
+> 触发信号、阶段链与门禁以本节等级表为权威；入口文件（AGENTS.md 等）的分级判定只保留缺省 L2 口径与指路，不重复明细。
 
 ### 2. 等级编排行为
 
-| 等级 | 阶段链 | 子代理策略 | 门禁 |
-|------|--------|------------|------|
-| **L0** | Init → Dev → Close（无 TASK 文档，主代理直接执行） | 主代理直接执行，不派发子代理 | 最小验证 + 中文提交 |
-| **L1** | Init → Dev → Close | coder/closer 可选；reviewer 默认跳过 | 计划放行（阶段 1 后）+ 质量门禁必须执行 |
-| **L2** | Init → Plan Review → 计划放行 → Dev → Code Review → Close | Main Agent 主线程规划；coder/closer 可子代理化；reviewer 独立 | 两次盲审 + 计划放行 + 证据链 |
-| **L3** | Init → Plan Review → Dev → Code Review → Close | 主代理控制流转，子代理只执行冻结任务 | 每阶段人工确认；部署需单独授权 |
+| 等级 | 触发信号 | 阶段链 | 子代理策略 | 门禁 |
+|------|---------|--------|------------|------|
+| **L0** | 纯机械修正、格式化、极小文案修补 | Init → Dev → Close（无 TASK 文档，主代理直接执行） | 主代理直接执行，不派发子代理 | 最小验证 + 中文提交 |
+| **L1** | 纯文档/纯测试/纯重构/不涉及外部系统 | Init → Dev → Close | coder/closer 可选；reviewer 默认跳过 | 计划放行（阶段 1 后）+ 质量门禁必须执行 |
+| **L2** | 业务逻辑变更/新增功能/修复 Bug | Init → Plan Review → 计划放行 → Dev → Code Review → Close | Main Agent 主线程规划；coder/closer 可子代理化；reviewer 独立 | 两次盲审 + 计划放行 + 证据链 |
+| **L3** | 数据库 Schema 变更/外部 API 对接/部署配置 | Init → Plan Review → Dev → Code Review → Close | 主代理控制流转，子代理只执行冻结任务 | 每阶段人工确认；部署需单独授权 |
 
 ### 3. 规划五阶段任务链
 

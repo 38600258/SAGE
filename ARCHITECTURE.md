@@ -39,8 +39,6 @@ SAGE 是工具无关的智能体优先开发工作流。1.0 版本将流程、�
 | 路径 | 类型 | 职责 |
 |------|------|------|
 | `AGENTS.md` | 入口 | 工具无关 SAGE 入口规则 |
-| `AGENTS.override.md` | 入口 | Codex app 自包含覆盖入口 |
-| `GEMINI.md` | 入口 | Antigravity/Gemini 类工具覆盖规则 |
 | `skills/sage-workflow/core/prompts/` | 角色契约默认发行版 | orchestrator、planner、reviewer、coder、closer、doc-gardener |
 | `skills/sage-workflow/core/templates/` | 模板默认发行版 | TASK、ADR、PRD 物理复制模板 |
 | `skills/sage-workflow/core/guides/` | 规范默认发行版 | 开发、任务、CHANGELOG、Git、执行通道、模型选择和核心信念 |
