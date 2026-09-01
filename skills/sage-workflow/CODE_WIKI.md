@@ -157,12 +157,12 @@
 | 1 | `check_template_copy` | TASK 是从模板物理复制且结构完整 |
 | 2 | `check_task_structure` | 任务 5 阶段大节齐全有序 |
 | 3 | `check_task_risk_sections` | L2/L3 必须有 1.3a 验收标准（AC-ID 可证伪契约）+ 1.3b 风险矩阵 |
-| 4 | `check_git_branch_isolation` | 禁在受保护分支开发；分支名符合 `feat/t-XXX-*` 等规范 |
+| 4 | `check_git_branch_isolation` | 禁在受保护分支开发；分支名符合 `feat/t-XXX-*` 等规范（上下文三态感知——T-022：受保护分支命中时按活跃任务存在性+工作区干净度三态判定：有活跃任务→阻断、无活跃任务+工作区非干净→阻断、无活跃任务+工作区干净→True+💡 终态/闲置跳过说明；两条阻断消息补 AP-009 披露——判定依据+`--allow-protected-branch` 豁免参数；非受保护分支命名校验零改动。l0 分支模式与 SAGE-08 共用 `_L0_BRANCH_PATTERNS`） |
 | 17 | `check_commit_message` | Conventional Commit + 描述含中文（commit-msg 门禁核心；hook 专属检查器，编号 17 为 hook 保留段——任务级检查器 rule ID 不占用，计划放行标签 [17/17] 显式映射 SAGE-18 即此原因） |
 | 5 | `check_t2_document_lines` | guides 下规范文档 ≤500 行 |
 | 6 | `check_document_freshness` | 文档 ≤30 天未更新（警告级，不阻塞） |
 | 7 | `check_templates_pristine` | 模板目录被篡改即阻断 |
-| 8 | `check_changelog_update` | 有代码变更时 CHANGELOG 必须同步（阶段感知：CHANGELOG 回填属 close 期动作——closer 契约阶段 5 职责，init/plan-review/dev/code-review 输出未到期说明跳过；close 维持强制；task_file=None/TASK 文件缺失/元数据缺失/未知值/模板默认行 fail-safe 强制——T-021，解析经 `_parse_current_stage`） |
+| 8 | `check_changelog_update` | 有代码变更时 CHANGELOG 必须同步（阶段感知：CHANGELOG 回填属 close 期动作——closer 契约阶段 5 职责，init/plan-review/dev/code-review 输出未到期说明跳过；close 维持强制；task_file=None/TASK 文件缺失/元数据缺失/未知值/模板默认行 fail-safe 强制——T-021，解析经 `_parse_current_stage`。L0 流程感知——T-022：无活跃任务上下文时，l0 命名分支豁免 CHANGELOG 强制（changelog-standards §一「L0 可不新增版本」）；非 l0 分支维持既有强制（fail-safe 最严侧）。已知限制：git-standards §一「L0 可直接在当前授权分支执行」场景不属 l0 分支命名形态，不在豁免内、维持既有强制。l0 判定模式与 SAGE-04 共用 `_L0_BRANCH_PATTERNS` 同一模式源） |
 | 9 | `check_append_only` | 决策/变更日志只增不改（区分真实删除与换行误报） |
 | 10 | `check_scope_lock` | 实际改动文件落在 TASK 1.4 Writeable 白名单 |
 | 11 | `check_cross_links` | 本地 md 相对链接有效 |

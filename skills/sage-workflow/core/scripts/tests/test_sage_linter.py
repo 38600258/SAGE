@@ -875,5 +875,169 @@ class PlanClearanceRuleIdContractTests(unittest.TestCase):
         self.assertNotIn("SAGE-17", ids)
 
 
+class CheckBranchIsolationContextTests(unittest.TestCase):
+    """check_git_branch_isolation 上下文三态（T-022）：受保护分支不再无脑阻断，而是区分
+    「开发进行中」与「合并后终态/任务间闲置」。
+
+    三态判定信号：活跃任务存在性 + 工作区干净度。两条阻断分支均补 AP-009 披露（判定依据
+    + --allow-protected-branch 豁免参数）。非受保护分支命名校验路径零改动。
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.linter = load_linter()
+        self.repo = Path(self.temp_dir.name)
+        self.linter.run_git_cmd(["init"], cwd=self.repo)
+        self.linter.run_git_cmd(["config", "user.email", "test@example.com"], cwd=self.repo)
+        self.linter.run_git_cmd(["config", "user.name", "tester"], cwd=self.repo)
+        # 提交一个基线文件，使分支可切换
+        (self.repo / "README.md").write_text("init\n", encoding="utf-8")
+        self.linter.run_git_cmd(["add", "."], cwd=self.repo)
+        self.linter.run_git_cmd(["commit", "-m", "init"], cwd=self.repo)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+        sys.modules.pop("sage_linter_under_test", None)
+
+    def _checkout(self, branch: str) -> None:
+        self.linter.run_git_cmd(["checkout", "-b", branch], cwd=self.repo)
+
+    def _write_task(self) -> Path:
+        """构造一个活跃任务文档，模拟「有活跃任务」上下文。"""
+        docs_dir = self.repo / "docs" / "project"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        task = docs_dir / "ACTIVE_TASK_T-TEST.md"
+        task.write_text(
+            "# TASK\n\n"
+            "- **任务编号 (ID)**: T-TEST\n"
+            "- **风险等级**: L2\n"
+            "- **当前阶段**: dev\n"
+            "- **项目根目录**: test\n"
+            "- **功能分支**: feat/t-test\n",
+            encoding="utf-8",
+        )
+        return task
+
+    def test_protected_branch_with_active_task_blocks(self) -> None:
+        # 态①受保护分支 + 有活跃任务 → 阻断；消息含判定依据与豁免参数
+        self._checkout("main")
+        task = self._write_task()
+        ok, msg = self.linter.check_git_branch_isolation(
+            cwd=self.repo, task_file=task
+        )
+        self.assertFalse(ok)
+        self.assertIn("活跃任务", msg)
+        self.assertIn("--allow-protected-branch", msg)
+
+    def test_protected_branch_no_task_dirty_workspace_blocks(self) -> None:
+        # 态②受保护分支 + 无活跃任务 + 工作区有变更 → 阻断；消息含判定依据与豁免参数
+        self._checkout("main")
+        (self.repo / "app.py").write_text("print('dirty')\n", encoding="utf-8")
+        ok, msg = self.linter.check_git_branch_isolation(cwd=self.repo, task_file=None)
+        self.assertFalse(ok)
+        self.assertIn("非干净", msg)
+        self.assertIn("--allow-protected-branch", msg)
+
+    def test_protected_branch_no_task_clean_workspace_skips(self) -> None:
+        # 态③受保护分支 + 无活跃任务 + 工作区干净 → True + 终态/闲置跳过说明
+        self._checkout("main")
+        ok, msg = self.linter.check_git_branch_isolation(cwd=self.repo, task_file=None)
+        self.assertTrue(ok)
+        self.assertIn("终态", msg)
+
+    def test_allow_protected_still_bypasses(self) -> None:
+        # 显式授权参数放行行为不变（态① + allow_protected → True）
+        self._checkout("main")
+        task = self._write_task()
+        ok, msg = self.linter.check_git_branch_isolation(
+            cwd=self.repo, allow_protected=True, task_file=task
+        )
+        self.assertTrue(ok)
+        self.assertIn("显式授权", msg)
+
+    def test_non_protected_naming_check_unchanged(self) -> None:
+        # 非受保护分支命名校验零改动：合法 t-XXX 分支 → 通过
+        self._checkout("fix/t-099-bugfix")
+        ok, msg = self.linter.check_git_branch_isolation(cwd=self.repo, task_file=None)
+        self.assertTrue(ok)
+        self.assertIn("通过", msg)
+
+    def test_non_protected_bad_name_still_blocks(self) -> None:
+        # 非受保护分支命名违规 → 阻断（命名校验路径不受三态影响）
+        self._checkout("random-branch")
+        ok, msg = self.linter.check_git_branch_isolation(cwd=self.repo, task_file=None)
+        self.assertFalse(ok)
+        self.assertIn("命名违规", msg)
+
+
+class CheckChangelogUpdateL0Tests(unittest.TestCase):
+    """check_changelog_update L0 流程感知（T-022）：无活跃任务时，l0 命名分支
+    豁免 CHANGELOG 强制（changelog-standards §一明文「L0 可不新增版本」）；
+    非 l0 分支维持既有强制（fail-safe 最严侧）。
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.linter = load_linter()
+        self.repo = Path(self.temp_dir.name)
+        self.linter.run_git_cmd(["init"], cwd=self.repo)
+        self.linter.run_git_cmd(["config", "user.email", "test@example.com"], cwd=self.repo)
+        self.linter.run_git_cmd(["config", "user.name", "tester"], cwd=self.repo)
+        (self.repo / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
+        self.linter.run_git_cmd(["add", "CHANGELOG.md"], cwd=self.repo)
+        self.linter.run_git_cmd(["commit", "-m", "init"], cwd=self.repo)
+        # 非元文件代码变更（CHANGELOG 未更新即应触发联动判定）
+        (self.repo / "app.py").write_text("print('code change')\n", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+        sys.modules.pop("sage_linter_under_test", None)
+
+    def _checkout(self, branch: str) -> None:
+        self.linter.run_git_cmd(["checkout", "-b", branch], cwd=self.repo)
+
+    def test_l0_branch_skips_changelog_force(self) -> None:
+        # l0 命名分支 + 有非元文件代码变更 + CHANGELOG 未更新 → True + L0 跳过说明
+        for branch in ("fix/l0-typo", "docs/l0-readme", "chore/l0-cleanup", "style/l0-fmt"):
+            with self.subTest(branch=branch):
+                self._checkout(branch)
+                ok, msg = self.linter.check_changelog_update(
+                    self.repo / "CHANGELOG.md", cwd=self.repo, task_file=None
+                )
+                self.assertTrue(ok)
+                self.assertIn("L0", msg)
+                self.assertIn("跳过", msg)
+
+    def test_non_l0_branch_enforces_changelog(self) -> None:
+        # 非 l0 分支 + 有非元文件代码变更 + CHANGELOG 未更新 → 维持既有强制阻断
+        self._checkout("fix/t-099-bugfix")
+        ok, msg = self.linter.check_changelog_update(
+            self.repo / "CHANGELOG.md", cwd=self.repo, task_file=None
+        )
+        self.assertFalse(ok)
+        self.assertIn("未进行同步更新", msg)
+
+    def test_stage_aware_no_regression(self) -> None:
+        # 有活跃任务时 T-021 阶段感知零回归：close 期维持强制阻断
+        self._checkout("fix/t-099-bugfix")
+        docs_dir = self.repo / "docs" / "project"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        task = docs_dir / "ACTIVE_TASK_T-TEST.md"
+        task.write_text(
+            "# TASK\n\n"
+            "- **任务编号 (ID)**: T-TEST\n"
+            "- **风险等级**: L2\n"
+            "- **当前阶段**: close\n"
+            "- **项目根目录**: test\n"
+            "- **功能分支**: fix/t-099-bugfix\n",
+            encoding="utf-8",
+        )
+        ok, msg = self.linter.check_changelog_update(
+            self.repo / "CHANGELOG.md", cwd=self.repo, task_file=task
+        )
+        self.assertFalse(ok)
+        self.assertIn("未进行同步更新", msg)
+
+
 if __name__ == "__main__":
     unittest.main()
