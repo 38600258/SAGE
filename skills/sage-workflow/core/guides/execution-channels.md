@@ -174,6 +174,9 @@ uv run python scripts/sage_dispatch.py provision --repo-root <repo> --adapter co
 
 # Claude Code 等项目内 agents 目录（随仓库版本化）
 uv run python scripts/sage_dispatch.py provision --repo-root <repo> --adapter claude-code --target-dir <repo>\.claude\agents
+
+# OMP 项目 .omp/ 目录三件套（config.yml modelRoles + agents/sage-*.md；模型标识符由用户替换占位符后合并）
+uv run python scripts/sage_dispatch.py provision --repo-root <repo> --adapter omp --target-dir <repo>\.omp
 ```
 
 生成后必须重启/刷新宿主，并用最小派发探针验证注册生效；注册是否可用以宿主实际派发结果为准，provision 本身不证明可用。

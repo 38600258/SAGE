@@ -250,7 +250,7 @@
 #### 通道治理
 
 - `doctor_probe(args)`：逐通道探测可用性（原生=声明判定、注入=声明+agent_types、CLI=只探测可执行文件），输出推荐通道。
-- `provision_delegate(args)`：委托 `adapters/<id>/provision.py` 生成 agent 注册文件（codex→TOML、claude-code→Markdown），subprocess 透传 `--target-dir / --role / --force / --format`（codex 额外透传 `--model-provider`）；`locate_provision_script` 按项目本地优先定位脚本，无 provision.py 的适配器（cli/generic-tool）报错退出码 2。
+- `provision_delegate(args)`：委托 `adapters/<id>/provision.py` 生成 agent 注册文件（codex→TOML、claude-code→Markdown、omp→.omp 目录三件套：config.yml + agents/sage-*.md），subprocess 透传 `--target-dir / --role / --force / --format`（codex 额外透传 `--model-provider`）；`locate_provision_script` 按项目本地优先定位脚本，无 provision.py 的适配器（cli/generic-tool）报错退出码 2。
 - `cancel`：仅标记 `host_cancel_required`，真正取消由宿主 API 完成。
 
 #### 子命令与格式化

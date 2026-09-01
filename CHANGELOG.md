@@ -4,6 +4,13 @@
 > 注：历史条目原本只记录日期，迁移到单行标题格式时用 `00:00:00` 作为回溯补齐时间。
 
 
+## [1.8.3] ✨ Feature 新增 OMP（Oh My Pi）适配器：omp.json/omp.md/provision.py 三件套，modelRoles+自定义 agent 异构盲审 (T-023) - 2026-09-01 16:40:00
+- 动机：SAGE 适配器体系已有 codex/claude-code/generic-tool/cli，但缺少 OMP（Oh My Pi）。OMP 的 `task` 工具可派发命名子代理，模型路由是角色级（modelRoles）而非请求级——先前按请求级语义实现内置 agent 映射（上轮返工），经官方源码（task-agent-discovery.md/settings.md/agents.ts/model-roles.ts）交叉验证后重构为角色路由语义。
+- 修复内容（相对上轮的断裂）：①`omp.json` 不用内置 agent 类型名（内置 reviewer/task 的 system prompt 是 OMP 协议非 SAGE 契约），改用自定义 agent 名（sage-reviewer/sage-coder/sage-closer）映射四阶段；`models.<phase>.id` 用自定义角色别名（sage-slow/sage-task）而非内置角色名。②`provision.py` 生成 `.omp/` 三件套：`config.yml`（modelRoles 段：sage-slow/sage-task/advisor 固定键）+ `agents/sage-*.md`（3 个自定义 agent，frontmatter `model: "@sage-slow"/"@sage-task"` 承载 SAGE 角色契约）；幂等默认 skipped、`--force` 覆盖（覆盖前检测非 modelRoles 段并告警）；`--role` 用角色名（reviewer/coder/closer）与 codex/claude-code 一致，`dispatch_phase.py` 零改动。③`omp.md` 说明模型路由链路（agent → frontmatter model → modelRoles → provider/model）、异构盲审配置（sage-slow 设不同厂商）、失败恢复（generic-tool injected 降级）。④`test_dispatch_phase.py` 新增 3 例 OMP 单测（生成+幂等+--force / --role 过滤 / 互证一致性+JSON 结构）。
+- 关键决策（详见 DECISION_LOG）：自定义 agent 名承载 SAGE 契约（内置 agent 行为协议不符）；models.id 用角色别名（模型变更只改 config.yml 一处）；advisor 用 OMP 固定键（自定义键是死配置）。
+- 已知限制补充（收尾诚实化）：编排层既有行为——SAGE 工作流 L2 dev/close 当前由 Main Agent 承担、不派发 sage-coder/sage-closer 子代理，故 OMP `@sage-task` 模型路由对 dev/close 不生效，仅盲审两阶段（plan-review/code-review）实现跨厂商异构。已登记 T-024 修复编排层使四阶段路由完整生效。
+
+
 ## [1.8.2] 🐛 BugFix 修复门禁同类感知缺口两处：SAGE-04 分支隔离补终态/闲置感知（无活跃任务+工作区干净不再误拦）与报错豁免披露，SAGE-08 补 L0 流程感知（l0 分支无活跃任务时不再强制 CHANGELOG） (T-022) - 2026-09-01 10:30:00
 - 缺陷暴露（动机）：T-021 修复 SAGE-08 阶段感知（到期点=close）后，对全部 17 个检查器做同类缺口体检，确认 2 项同类感知缺失：①SAGE-04 分支隔离检查器只看分支名，不区分「开发进行中」与「合并后终态/任务间闲置」——T-021 收尾实证：合并回 main 后跑 `--all`，无活跃任务（已归档）+ 工作区干净，仍报 🔴 [4/17]「隔离红线违规」；且阻断消息未披露 `--allow-protected-branch` 豁免参数（AP-009 违例，T-021 已为 SAGE-07 补过同类披露，先例一致）。②SAGE-08 `task_file=None`（无活跃任务）时无条件强制「代码变更必须伴随 CHANGELOG 更新」，但 changelog-standards §一明文「L0 纯机械修正可不新增版本」——l0 分支上修改非元文件（如 skills/ 下交付物，`_META_PREFIXES` 不含 `skills/`）同样命中误拦，缺口在本仓库即真实存在。
 - 修复内容：①新增模块级共享常量 `_L0_BRANCH_PATTERNS`（四个 l0 正则），SAGE-04 allowed_patterns 与 SAGE-08 L0 豁免共用同一模式源，防漂移（盲审建议 1）。②`check_git_branch_isolation(cwd=None, allow_protected=False, task_file=None)` 受保护分支命中时按上下文三态判定：有活跃任务→阻断（含任务名判定依据 + `--allow-protected-branch` 豁免披露）；无活跃任务+工作区非干净→阻断（含变更文件数判定依据 + 豁免披露）；无活跃任务+工作区干净→True+💡 终态/闲置跳过说明（对齐 T-021/AP-010 三态语义）；非受保护分支命名校验路径零改动；两处调用点（单项 `--check-branch` 与场景 B `--all`）透传 `task_file`。③`check_changelog_update` 在无活跃任务上下文（`task_file=None` 或文件不存在）时解析分支名匹配 l0 → True+💡 L0 跳过说明（含 changelog-standards §一出处 + 若改变规则仍需记录的提示）；非 l0 分支维持既有强制（fail-safe 最严侧）；有活跃任务时 T-021 阶段感知零改动。
