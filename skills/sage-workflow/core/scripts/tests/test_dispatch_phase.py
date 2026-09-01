@@ -629,7 +629,10 @@ task.write_text(content, encoding='utf-8')
         )
         payload = json.loads(completed.stdout)
         statuses = {item["role"]: item["status"] for item in payload["results"]}
-        self.assertTrue(all(s == "skipped" for s in statuses.values()), statuses)
+        # 不带 --force：agent 文件 skipped（幂等），config.yml 增量合并 written
+        agent_statuses = [v for k, v in statuses.items() if k.startswith("agent:")]
+        self.assertTrue(all(s == "skipped" for s in agent_statuses), agent_statuses)
+        self.assertEqual(statuses["config:modelroles"], "written", statuses)
         completed = self.dispatch(
             "provision",
             "--adapter",

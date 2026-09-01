@@ -95,9 +95,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--target-dir",
-        required=True,
         type=Path,
-        help="OMP 项目配置根目录（应为 <repo>/.omp；config.yml 写入该根，agent 定义写入 agents/ 子目录）",
+        default=Path.cwd() / ".omp",
+        help="OMP 项目配置根目录（应为 <repo>/.omp）；不指定时默认 <当前目录>/.omp；config.yml 写入该根，agent 定义写入 agents/ 子目录",
     )
     parser.add_argument(
         "--role",
@@ -107,7 +107,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="覆盖已存在的配置文件",
+        help="强制覆盖已存在的配置文件；不带 --force 时 config.yml 为增量合并（保留非 modelRoles 段），agent 文件存在时跳过",
     )
     parser.add_argument(
         "--format",
@@ -138,8 +138,8 @@ def phase_role(phase: str) -> str:
     raise ValueError(f"未知阶段：{phase}")
 
 
-def build_config_yml(phases: list[str], models: dict[str, Any]) -> tuple[str, list[str]]:
-    """生成 config.yml 的 modelRoles 段；每阶段独立键。
+def build_modelroles_block(phases: list[str], models: dict[str, Any]) -> tuple[str, list[str]]:
+    """生成 config.yml 的 modelRoles 段文本（含 modelRoles: 键和子键）；每阶段独立键。
 
     模型值从 omp.json models.<phase>.id 读取（用户填实际模型标识符，如 anthropic/claude-sonnet-4-5）。
     未填写时写占位符并告警。
@@ -147,7 +147,7 @@ def build_config_yml(phases: list[str], models: dict[str, Any]) -> tuple[str, li
     warnings: list[str] = []
     lines = [
         "# OMP modelRoles 配置（SAGE 适配器生成）",
-        "# 每阶段独立键；模型值来自 omp.json models.<phase>.id；将本段合并到 OMP config.yml。",
+        "# 每阶段独立键；模型值来自 omp.json models.<phase>.id。",
         "# 跨模型异构盲审：将 plan-review/code-review 阶段的模型配为与 default（主会话模型）不同厂商的模型。",
         "",
         "modelRoles:",
@@ -162,7 +162,6 @@ def build_config_yml(phases: list[str], models: dict[str, Any]) -> tuple[str, li
             warnings.append(f"阶段 '{phase}' 未在 omp.json 配置模型标识符，已写占位符")
     advisor_desc = "可选第二遍审查角色；在 sage-*.md frontmatter 加 advisor: true 后生效；配置为第三厂商可实现三重异构审查"
     lines.append(f"  advisor: <advisor-provider/model>  # {advisor_desc}")
-
     lines.extend(
         [
             "",
@@ -192,8 +191,43 @@ def build_agent_md(phase: str) -> str:
     )
 
 
+def merge_config_yml(existing_text: str, new_modelroles_block: str) -> str:
+    """增量合并：保留已有 config.yml 中非 modelRoles 段，替换 modelRoles 段为新生成内容。
+
+    策略：逐行扫描，提取 modelRoles: 到下一个顶层键之间的行（即旧 modelRoles 段），
+    其余行（含注释、空行、其他段）保留；最终输出 = 保留段 + 新 modelRoles 段。
+    """
+    preserved: list[str] = []
+    in_modelroles = False
+    for line in existing_text.splitlines():
+        stripped = line.strip()
+        # 顶层键判定：无缩进且含冒号
+        if not line.startswith((" ", "\t")) and ":" in stripped:
+            key = stripped.split(":", 1)[0].strip()
+            in_modelroles = (key == "modelRoles")
+            if not in_modelroles:
+                preserved.append(line)
+            # modelRoles 行本身被丢弃（由 new_block 替换）
+            continue
+        # 非顶层行：在 modelRoles 段内则丢弃，在其他段内则保留
+        if in_modelroles:
+            continue
+        preserved.append(line)
+    # 清理末尾多余空行
+    while preserved and preserved[-1].strip() == "":
+        preserved.pop()
+    if preserved:
+        return "\n".join(preserved) + "\n\n" + new_modelroles_block
+    return new_modelroles_block
+
+
 def provision(args: argparse.Namespace) -> dict[str, Any]:
-    """按角色生成 agents/sage-<phase>.md + config.yml；已存在且未 --force 时跳过，保证幂等可重入。"""
+    """按角色生成 agents/sage-<phase>.md + config.yml。
+
+    写入语义：
+    - agent 文件：不存在→写入；存在+不带 --force→skipped；存在+--force→覆盖
+    - config.yml：不存在→写入（新建）；存在+不带 --force→增量合并（保留非 modelRoles 段，替换 modelRoles 段）；存在+--force→整文件覆盖
+    """
     models, models_source = load_omp_json()
     roles = [args.role] if args.role else list(PROVISION_ROLES)
 
@@ -217,18 +251,28 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
         target_path.write_text(content, encoding="utf-8")
         results.append({"role": f"agent:{phase}", "path": str(target_path), "status": "written", "note": None})
 
-    # config.yml（modelRoles 段）：按被生成角色的阶段收集
-    config_content, warnings = build_config_yml(generated_phases, models)
+    # config.yml（modelRoles 段）
+    modelroles_block, warnings = build_modelroles_block(generated_phases, models)
 
     config_path = target_dir / "config.yml"
     if config_path.exists() and not args.force:
-        results.append({"role": "config:modelroles", "path": str(config_path), "status": "skipped", "note": "已存在；使用 --force 覆盖"})
-    else:
-        # ⚠️-3：覆盖前检测已有 config.yml 是否含非 modelRoles 段，提示合并风险
-        extra = detect_non_modelroles_sections(config_path) if config_path.exists() else None
-        config_path.write_text(config_content, encoding="utf-8")
-        note = f"警告: 已覆盖现有 config.yml，丢失非 modelRoles 段: {extra}" if extra else None
+        # 增量合并：保留非 modelRoles 段，替换 modelRoles 段
+        existing = config_path.read_text(encoding="utf-8")
+        merged = merge_config_yml(existing, modelroles_block)
+        config_path.write_text(merged, encoding="utf-8")
+        extra = detect_non_modelroles_sections(existing)
+        note = f"增量合并：保留非 modelRoles 段（{extra}）" if extra else "增量合并"
         results.append({"role": "config:modelroles", "path": str(config_path), "status": "written", "note": note})
+    elif config_path.exists() and args.force:
+        # --force：整文件覆盖（丢失非 modelRoles 段，已告警）
+        extra = detect_non_modelroles_sections(config_path.read_text(encoding="utf-8"))
+        config_path.write_text(modelroles_block, encoding="utf-8")
+        note = f"警告: --force 整文件覆盖，丢失非 modelRoles 段: {extra}" if extra else None
+        results.append({"role": "config:modelroles", "path": str(config_path), "status": "written", "note": note})
+    else:
+        # 不存在 → 新建
+        config_path.write_text(modelroles_block, encoding="utf-8")
+        results.append({"role": "config:modelroles", "path": str(config_path), "status": "written", "note": None})
 
     if warnings:
         warn_text = "; ".join(warnings)
@@ -237,12 +281,11 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
                 item["note"] = f"警告: {warn_text}" if item["note"] is None else f"{item['note']}; 警告: {warn_text}"
 
     post_steps = [
-        "将 config.yml 的 modelRoles 段合并到 OMP 实际配置（全局 ~/.omp/agent/config.yml 或项目 <repo>/.omp/config.yml）。",
         "如 omp.json 中某阶段 models.id 为 null，config.yml 对应阶段角色为占位符 <provider/model>；请在 omp.json 填入实际模型标识符后重新 provision，或直接编辑 config.yml 替换占位符。",
         "确认 agents/sage-*.md 位于 <repo>/.omp/agents/ 下；OMP 从该目录发现自定义 agent（项目优先于用户级与内置）。",
         "重启或刷新 OMP；在 /agents 面板确认 sage-plan-review/sage-dev/sage-code-review/sage-close 可见，在 /model 的 Roles 视图确认同名角色。",
         "跨模型异构盲审：将 omp.json 中 plan-review/code-review 阶段的 models.id 配置为与 default（主会话模型）不同厂商的模型。",
-        "本脚本不修改 OMP 实际配置；所有变更由用户手动合并放置。",
+        "不带 --force 时 config.yml 为增量合并（保留非 modelRoles 段）；带 --force 时整文件覆盖。",
     ]
 
     return {
@@ -254,12 +297,8 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def detect_non_modelroles_sections(config_path: Path) -> str | None:
-    """检测已存在 config.yml 中 modelRoles 段之外的顶层段（如 task/settings 等），返回逗号分隔名称；无额外段返回 None。"""
-    try:
-        text = config_path.read_text(encoding="utf-8")
-    except OSError:
-        return None
+def detect_non_modelroles_sections(text: str) -> str | None:
+    """检测 config.yml 文本中 modelRoles 段之外的顶层段（如 task/settings 等），返回逗号分隔名称；无额外段返回 None。"""
     extra: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()

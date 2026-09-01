@@ -84,18 +84,28 @@ uv run python scripts/sage_dispatch.py verify --receipt <receipt> --format json
 
 ## 子代理配置生成（provision）
 
-OMP 自定义 agent 需要配置文件才能被 `task` 工具派发。`provision` 生成 `<target-dir>/.omp/` 目录三件套（config.yml + 4 个独立 agent）：
+OMP 自定义 agent 需要配置文件才能被 `task` 工具派发。`provision` 生成 `.omp/` 目录（config.yml + 4 个独立 agent）：
 
 ```powershell
-# 独立运行（从同目录 omp.json 读取角色映射与模型值；--target-dir 指向 <repo>/.omp）
+# 不带参数：默认生成到 <当前目录>/.omp，config.yml 增量合并（保留已有非 modelRoles 段）
+uv run python docs/guides/execution-adapters/omp/provision.py
+
+# 指定目标目录
 uv run python docs/guides/execution-adapters/omp/provision.py --target-dir D:\repo\.omp
 
-# 或经主入口委托执行（bootstrap 后的项目内必须带 --repo-root）
+# --force：强制覆盖所有文件（config.yml 整文件覆盖，agent 文件覆盖）
+uv run python docs/guides/execution-adapters/omp/provision.py --force
+
+# 经主入口委托执行（bootstrap 后的项目内必须带 --repo-root）
 uv run python scripts/sage_dispatch.py provision --repo-root D:\repo --adapter omp --target-dir D:\repo\.omp
 
 # 只生成 reviewer 角色（生成 sage-plan-review + sage-code-review 两个 agent）
-uv run python docs/guides/execution-adapters/omp/provision.py --target-dir D:\repo\.omp --role reviewer
+uv run python docs/guides/execution-adapters/omp/provision.py --role reviewer
 ```
+
+写入语义：
+- **agent 文件**：不存在→写入；已存在+不带 `--force`→跳过；已存在+`--force`→覆盖
+- **config.yml**：不存在→新建；已存在+不带 `--force`→**增量合并**（保留非 `modelRoles` 段如 `task`/`settings`，只替换 `modelRoles` 段）；已存在+`--force`→整文件覆盖（会丢失非 `modelRoles` 段，有告警）
 
 生成产物：
 
@@ -106,7 +116,7 @@ uv run python docs/guides/execution-adapters/omp/provision.py --target-dir D:\re
 5. `agents/sage-close.md` — close 用（`model: "@sage-close"`）
 
 生成后：
-- 将 `config.yml` 的 `modelRoles` 段合并到 `~/.omp/agent/config.yml`（全局）或 `<repo>/.omp/config.yml`（项目）。已配置的模型值直接可用；占位符需在 omp.json 补填后重新 provision 或直接编辑 config.yml。
+- 如 omp.json 中某阶段 `models.id` 为 null，config.yml 对应阶段角色为占位符 `<provider/model>`；请在 omp.json 填入实际模型标识符后重新 provision，或直接编辑 config.yml 替换。
 - 确认 `agents/sage-*.md` 位于 `<repo>/.omp/agents/` 下——OMP 从该目录发现自定义 agent（项目优先于用户级与内置，first-wins 按 name 去重）。
 - 重启/刷新 OMP，在 `/agents` 面板确认 `sage-plan-review`/`sage-dev`/`sage-code-review`/`sage-close` 可见，在 `/model` 的 Roles 视图确认同名角色。
 - provision 不写出工作区外配置；注册是否生效以宿主实际派发结果为准。
