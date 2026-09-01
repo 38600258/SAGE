@@ -6,10 +6,10 @@
     "supported": true,
     "invoker": "host",
     "agent_types": {
-      "plan-review": "sage-plan-review",
-      "dev": "sage-dev",
-      "code-review": "sage-code-review",
-      "close": "sage-close"
+      "plan-review": "sage_reviewer",
+      "dev": "sage_coder",
+      "code-review": "sage_reviewer",
+      "close": "sage_closer"
     }
   },
   "models": {

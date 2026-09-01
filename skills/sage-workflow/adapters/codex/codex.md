@@ -19,14 +19,37 @@
 2. `codex.json` 将四个阶段映射为 `sage_reviewer`、`sage_coder`、`sage_reviewer`、`sage_closer`。当 `prepare` 返回 `action=spawn_subagent` 时，Main Agent 必须立即调用 Codex 当前可用的原生 subagent API，并只传信封中的 `prompt`。
 3. subagent 完成后运行 `verify --receipt <path>`；只有 TASK 对应章节和 Git 状态出现有效产出才算成功。
 4. `status` 读取协议状态；`cancel` 只标记 `host_cancel_required`，Main Agent 仍须调用 Codex 原生取消/关闭能力。
-5. `codex.json` 的模型绑定为 `agent-registration`：`plan-review`/`code-review` 使用 `claude-opus-4-7`，`dev` 使用 `deepseek-v4-pro`，`close` 使用 `deepseek-v4-flash`。这些值必须与宿主 `sage-reviewer`、`sage-coder`、`sage-closer` 注册配置一致，单次 `--model` 不能覆盖。
+5. `codex.json` 的模型绑定为 `agent-registration`：`plan-review`/`code-review` 使用 `gpt-5.6-sol`，`dev` 使用 `gpt-5.6-terra`，`close` 使用 `gpt-5.6-luna`。这些值必须与宿主 `sage_reviewer`、`sage_coder`、`sage_closer` 注册配置一致，单次 `--model` 不能覆盖。
 
 示例：
 
 ```powershell
-uv run python scripts/sage_dispatch.py prepare --repo-root D:\repo --task-path D:\repo\docs\project\ACTIVE_TASK_T-001.md --phase dev --adapter codex --model deepseek-v4-pro --format json
+uv run python scripts/sage_dispatch.py prepare --repo-root D:\repo --task-path D:\repo\docs\project\ACTIVE_TASK_T-001.md --phase dev --adapter codex --model gpt-5.6-terra --format json
 uv run python scripts/sage_dispatch.py verify --receipt <receipt> --format json
 ```
+
+## 子代理配置生成（provision）
+
+Codex 自定义 agent 是 TOML 注册文件（`sage_reviewer.toml`/`sage_coder.toml`/`sage_closer.toml`），需放置到宿主注册目录才能被原生 subagent 派发。`provision` 生成：
+
+```powershell
+# 不带参数：默认生成到 <当前目录>/.codex/agents（项目目录），随仓库版本管理
+uv run python docs/guides/execution-adapters/codex/provision.py
+
+# 部署到宿主用户注册目录（~/.codex/agents），与 --target-dir 互斥
+uv run python docs/guides/execution-adapters/codex/provision.py --user
+
+# 指定目标目录
+uv run python docs/guides/execution-adapters/codex/provision.py --target-dir C:\Users\vxie\.codex\agents
+```
+
+复制/部署方式（给 AI 看的一句话自动部署）：
+
+- **项目目录（默认）**：在仓库根运行 `provision.py`（不带参数），生成 `<repo>/.codex/agents/`（3 个 TOML），随仓库版本管理。
+- **用户目录（--user）**：运行 `provision.py --user`，生成 `~/.codex/agents/`（3 个 TOML），全局配置、多项目共享。
+- 手动复制：把 `sage_reviewer.toml`/`sage_coder.toml`/`sage_closer.toml` 复制到 `.codex/agents/`（项目）或 `~/.codex/agents/`（个人）。
+
+写入语义：文件不存在→写入；已存在+不带 `--force`→跳过；已存在+`--force`→覆盖（幂等可重入）。
 
 ## 失败恢复
 
