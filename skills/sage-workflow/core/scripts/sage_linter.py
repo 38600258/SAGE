@@ -47,6 +47,15 @@ from pathlib import Path
 # 元文件前缀与文件名（范围锁定和 CHANGELOG 校验中需排除的非项目源文件）
 # .sage/ 为 linter 自身运行日志目录，避免门禁产物被误判为项目源码
 _META_PREFIXES = (".sage/", "docs/", "templates/", "archive/", "scripts/", "prompts/")
+
+# L0 分支命名模式：SAGE-04 allowed_patterns 与 SAGE-08 L0 豁免共用同一模式源，防漂移
+# （T-022 盲审建议 1：两检查器共享「l0 分支形态」契约，避免各自维护正则）
+_L0_BRANCH_PATTERNS = [
+    r"^fix/l0-[a-z0-9][a-z0-9-]*$",
+    r"^docs/l0-[a-z0-9][a-z0-9-]*$",
+    r"^chore/l0-[a-z0-9][a-z0-9-]*$",
+    r"^style/l0-[a-z0-9][a-z0-9-]*$",
+]
 _META_EXACT = {
     "AGENTS.md", "ARCHITECTURE.md", "CHANGELOG.md",
     ".gitignore", ".env", ".editorconfig",
@@ -480,8 +489,16 @@ def check_task_risk_sections(task_file):
 
     return True, f"风险分级扩展项校验通过 (风险等级: {risk_level})" + (acceptance_warning if risk_level in ["L2", "L3"] else "")
 
-def check_git_branch_isolation(cwd=None, allow_protected=False):
-    """4. 分支隔离校验: 校验当前是否处于受保护的主干分支上开发"""
+def check_git_branch_isolation(cwd=None, allow_protected=False, task_file=None):
+    """4. 分支隔离校验: 校验当前是否处于受保护的主干分支上开发
+
+    上下文三态感知（T-022）：受保护分支命中时按上下文判定，而非无脑阻断——
+    ①有活跃任务 → 阻断（开发应走功能分支）；②无活跃任务+工作区有变更 → 阻断
+    （直改保护分支即违规开发）；③无活跃任务+工作区干净 → True+💡 终态/闲置跳过
+    说明（合并后终态或任务间闲置，非开发场景）。两条阻断消息均补 AP-009 披露
+    （自述判定依据 + --allow-protected-branch 豁免参数与适用条件）。非受保护分支
+    命名校验路径零改动。task_file=None（向后兼容）时退化为「无活跃任务」上下文。
+    """
     curr_branch = run_git_cmd(["branch", "--show-current"], cwd)
     if not curr_branch:
         # 尝试通过 git status 解析
@@ -497,13 +514,37 @@ def check_git_branch_isolation(cwd=None, allow_protected=False):
     if curr_branch in protected_branches:
         if allow_protected:
             return True, f"受保护分支 '{curr_branch}' 已由显式授权参数放行。"
-        return False, f"🛑 隔离红线违规：当前处于受保护的分支 '{curr_branch}'。所有开发必须在独立功能分支上进行！"
+
+        # 上下文三态判定：活跃任务存在性（task_file 非空且文件存在）
+        # 与工作区干净度（get_git_diff_files 复用既有实现）为判定信号
+        has_active_task = task_file is not None and Path(task_file).exists()
+
+        if has_active_task:
+            # 态①有活跃任务 → 阻断（开发应走功能分支）
+            return False, (
+                f"🛑 隔离红线违规：当前处于受保护的分支 '{curr_branch}' 且存在活跃任务"
+                f"（{Path(task_file).name}），开发必须在独立功能分支上进行！"
+                f"如为已授权的合并/推送阶段，可使用 --allow-protected-branch 参数豁免本项校验。"
+            )
+
+        # 无活跃任务：检查工作区是否干净
+        changed_files = get_git_diff_files(cwd)
+        if changed_files:
+            # 态②无活跃任务+工作区非干净 → 阻断（直改保护分支即违规开发）
+            return False, (
+                f"🛑 隔离红线违规：当前处于受保护的分支 '{curr_branch}'，无活跃任务"
+                f"但工作区非干净（{len(changed_files)} 个未提交变更文件）。"
+                f"如为已授权的合并/推送阶段，可使用 --allow-protected-branch 参数豁免本项校验。"
+            )
+
+        # 态③无活跃任务+工作区干净 → True+💡 终态/闲置跳过说明
+        return True, (
+            f"💡 受保护分支 '{curr_branch}' 无活跃任务且工作区干净，"
+            f"判定为合并后终态或任务间闲置，跳过分支隔离阻断。"
+        )
 
     allowed_patterns = [
-        r"^fix/l0-[a-z0-9][a-z0-9-]*$",
-        r"^docs/l0-[a-z0-9][a-z0-9-]*$",
-        r"^chore/l0-[a-z0-9][a-z0-9-]*$",
-        r"^style/l0-[a-z0-9][a-z0-9-]*$",
+        * _L0_BRANCH_PATTERNS,
         r"^feat/t-\d{3,}-[a-z0-9][a-z0-9-]*$",
         r"^feature/[Tt]-\d{3,}-[a-z0-9][a-z0-9-]*$",
         r"^fix/t-\d{3,}-[a-z0-9][a-z0-9-]*$",
@@ -669,6 +710,11 @@ def check_changelog_update(changelog_file, cwd=None, task_file=None):
     「拦截位置写错」的阶段预期拦截；close 期维持既有强制判定。task_file=None（向后兼容）或
     TASK 文件不存在、元数据缺失/未知阶段值/模板默认行时，按 fail-safe 退回既有强制行为（最严侧），
     与 check_evidence_complete 的阶段感知设计同构（复用 _parse_current_stage 单一解析点）。
+
+    L0 流程感知（T-022）：无活跃任务上下文（task_file=None 或文件不存在）时，l0 命名分支
+    豁免 CHANGELOG 强制（changelog-standards §一「L0 纯机械修正可不新增版本」）；非 l0 分支
+    维持既有强制（fail-safe 最严侧）。l0 判定模式与 SAGE-04 allowed_patterns 共用
+    _L0_BRANCH_PATTERNS 同一模式源，防漂移。有活跃任务时的阶段感知判定（T-021）零改动。
     """
     changelog_path = Path(changelog_file)
     if not changelog_path.exists():
@@ -705,7 +751,23 @@ def check_changelog_update(changelog_file, cwd=None, task_file=None):
                     "无法判定任务所处阶段，按 fail-safe 强制校验 CHANGELOG 更新；"
                     "请更新任务元数据「当前阶段」（取值：init/plan-review/dev/code-review/close）。"
                 )
-        # task_file 指向的文件不存在：退化为既有强制行为（fail-safe 最严侧）
+        # task_file 指向的文件不存在：落入下方 L0 判定（无活跃任务上下文，fail-safe 最严侧）
+
+    # L0 流程感知（T-022）：无活跃任务上下文（task_file=None 或文件不存在）时，
+    # l0 命名分支豁免 CHANGELOG 强制——changelog-standards §一明文「L0 纯机械修正可不新增版本」；
+    # l0 分支前缀是 SAGE-04 allowed_patterns 已固化的既有契约，是「本变更属 L0 流程」唯一
+    # 机器可读声明。命中 → 💡 跳过（含规范出处 + 若改变规则仍需记录的提示）；未命中
+    # （如 t-XXX 分支却无 TASK 文档）维持既有强制（fail-safe 最严侧）。有活跃任务时
+    # （task_file 指向文件存在）上方阶段感知判定已先行 return，不进入本块。
+    has_active_task_ctx = task_file is not None and Path(task_file).exists()
+    if not has_active_task_ctx:
+        curr_branch = run_git_cmd(["branch", "--show-current"], cwd)
+        if curr_branch and any(re.match(pat, curr_branch) for pat in _L0_BRANCH_PATTERNS):
+            return True, (
+                f"💡 当前分支 '{curr_branch}' 符合 L0 流程命名规范且无活跃任务，"
+                f"按 changelog-standards §一「L0 纯机械修正可不新增版本」跳过 CHANGELOG 强制。"
+                f"若改变规则、目录口径或历史归档，仍需记录变更。"
+            )
 
     # [FIX BUG-5] 使用统一的 _is_meta_file 判定，而非硬编码不完整的排除列表
     has_code_change = False
@@ -1517,7 +1579,8 @@ def main():
     # ======================================================================
     if is_single_check:
         if args.check_branch:
-            ok, msg = check_git_branch_isolation(sage_root, args.allow_protected_branch)
+            task_file = find_active_task(sage_root)
+            ok, msg = check_git_branch_isolation(sage_root, args.allow_protected_branch, task_file=task_file)
             collector.add("4. 分支隔离与命名校验", ok, msg)
 
         if args.check_scope:
@@ -1606,7 +1669,7 @@ def main():
                 print("ℹ️ 未发现当前活跃任务文档 (docs/project/ACTIVE_TASK_T-*.md)，跳过任务级细节校验。")
 
         # 1. 物理分支隔离校验
-        ok, msg = check_git_branch_isolation(sage_root, args.allow_protected_branch)
+        ok, msg = check_git_branch_isolation(sage_root, args.allow_protected_branch, task_file=task_file)
         collector.add("[4/17] 分支隔离校验", ok, msg)
 
         # 2. 模板守护校验
