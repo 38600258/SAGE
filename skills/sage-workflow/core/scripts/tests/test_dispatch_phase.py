@@ -580,7 +580,7 @@ task.write_text(content, encoding='utf-8')
         self.assertFalse((target / "sage-reviewer.md").exists())
 
     def test_provision_omp_generates_agents_and_config_skips_existing(self) -> None:
-        """OMP provision 生成 .omp/ 三件套（config.yml + 3 个 agent .md），幂等不覆盖，--force 覆盖。"""
+        """OMP provision 生成 .omp/ 三件套（config.yml + 4 个独立 agent .md），幂等不覆盖，--force 覆盖。"""
         target = Path(self.temp_dir.name) / "omp-config"
         completed = self.dispatch(
             "provision",
@@ -597,29 +597,27 @@ task.write_text(content, encoding='utf-8')
         self.assertEqual(
             statuses,
             {
-                "agent:reviewer": "written",
-                "agent:coder": "written",
-                "agent:closer": "written",
+                "agent:plan-review": "written",
+                "agent:dev": "written",
+                "agent:code-review": "written",
+                "agent:close": "written",
                 "config:modelroles": "written",
             },
         )
-        # 产物齐全
         self.assertTrue((target / "config.yml").is_file())
-        for name in ("sage-reviewer", "sage-coder", "sage-closer"):
+        for name in ("sage-plan-review", "sage-dev", "sage-code-review", "sage-close"):
             self.assertTrue((target / "agents" / f"{name}.md").is_file())
-        # config.yml 含 modelRoles 角色别名（去重：sage-slow 出现 1 次、sage-task 出现 1 次）
         config = (target / "config.yml").read_text(encoding="utf-8")
         self.assertIn("modelRoles:", config)
-        self.assertEqual(len(re.findall(r"^\s+sage-slow:", config, re.MULTILINE)), 1)
-        self.assertEqual(len(re.findall(r"^\s+sage-task:", config, re.MULTILINE)), 1)
-        # agent frontmatter 的 model 别名正确
-        reviewer = (target / "agents" / "sage-reviewer.md").read_text(encoding="utf-8")
-        self.assertIn('name: sage-reviewer', reviewer)
-        self.assertIn('model: "@sage-slow"', reviewer)
-        coder = (target / "agents" / "sage-coder.md").read_text(encoding="utf-8")
-        self.assertIn('model: "@sage-task"', coder)
-
-        # 幂等：未 --force 时全部 skipped
+        for alias in ("sage-plan-review", "sage-dev", "sage-code-review", "sage-close"):
+            self.assertEqual(len(re.findall(rf"^\s+{alias}:", config, re.MULTILINE)), 1)
+        plan_review = (target / "agents" / "sage-plan-review.md").read_text(encoding="utf-8")
+        self.assertIn('name: sage-plan-review', plan_review)
+        self.assertIn('model: "@sage-plan-review"', plan_review)
+        dev = (target / "agents" / "sage-dev.md").read_text(encoding="utf-8")
+        self.assertIn('model: "@sage-dev"', dev)
+        close = (target / "agents" / "sage-close.md").read_text(encoding="utf-8")
+        self.assertIn('model: "@sage-close"', close)
         completed = self.dispatch(
             "provision",
             "--adapter",
@@ -632,8 +630,6 @@ task.write_text(content, encoding='utf-8')
         payload = json.loads(completed.stdout)
         statuses = {item["role"]: item["status"] for item in payload["results"]}
         self.assertTrue(all(s == "skipped" for s in statuses.values()), statuses)
-
-        # --force 覆盖
         completed = self.dispatch(
             "provision",
             "--adapter",
@@ -648,8 +644,8 @@ task.write_text(content, encoding='utf-8')
         statuses = {item["role"]: item["status"] for item in payload["results"]}
         self.assertTrue(all(s == "written" for s in statuses.values()), statuses)
 
-    def test_provision_omp_role_filter_generates_single_agent(self) -> None:
-        """OMP provision --role reviewer 只生成 sage-reviewer.md 与对应 config.yml 角色段。"""
+    def test_provision_omp_role_filter_generates_plan_and_code_review(self) -> None:
+        """OMP provision --role reviewer 生成 plan-review+code-review 两个 agent 与对应 config.yml 阶段键。"""
         target = Path(self.temp_dir.name) / "omp-role-filter"
         completed = self.dispatch(
             "provision",
@@ -666,26 +662,36 @@ task.write_text(content, encoding='utf-8')
         statuses = {item["role"]: item["status"] for item in payload["results"]}
         self.assertEqual(
             statuses,
-            {"agent:reviewer": "written", "config:modelroles": "written"},
+            {
+                "agent:plan-review": "written",
+                "agent:code-review": "written",
+                "config:modelroles": "written",
+            },
         )
-        # 只生成 reviewer agent，不生成 coder/closer
-        self.assertTrue((target / "agents" / "sage-reviewer.md").is_file())
-        self.assertFalse((target / "agents" / "sage-coder.md").exists())
-        # config.yml 只含 sage-slow（reviewer 角色别名），不含 sage-task
+        # reviewer 角色生成 plan-review + code-review 两个独立 agent，不生成 dev/close
+        self.assertTrue((target / "agents" / "sage-plan-review.md").is_file())
+        self.assertTrue((target / "agents" / "sage-code-review.md").is_file())
+        self.assertFalse((target / "agents" / "sage-dev.md").exists())
+        self.assertFalse((target / "agents" / "sage-close.md").exists())
+        # config.yml 只含 plan-review/code-review 阶段键，不含 dev/close
         config = (target / "config.yml").read_text(encoding="utf-8")
-        self.assertIn("sage-slow:", config)
-        self.assertNotIn("sage-task:", config)
+        self.assertIn("sage-plan-review:", config)
+        self.assertIn("sage-code-review:", config)
+        self.assertNotIn("sage-dev:", config)
+        self.assertNotIn("sage-close:", config)
 
-    def test_provision_omp_cross_consistency_and_json_structure(self) -> None:
-        """OMP provision：同别名（sage-slow）下 plan-review 与 code-review 模型值不一致时触发 warning；JSON 输出结构含 post_steps/target_dir/models_source。"""
-        target = Path(self.temp_dir.name) / "omp-consistency"
-        # 篡改 omp.json：plan-review 和 code-review 同属 sage-slow 别名，填不同模型值制造不一致
+    def test_provision_omp_each_phase_model_written_independently(self) -> None:
+        """OMP provision：每阶段独立模型写入 config.yml；JSON 输出结构含 post_steps/target_dir/models_source。"""
+        target = Path(self.temp_dir.name) / "omp-models"
+        # 篡改 omp.json：4 个阶段填不同模型值，验证各阶段独立写入互不覆盖
         omp_json = SKILL_ROOT / "adapters" / "omp" / "omp.json"
         original = omp_json.read_text(encoding="utf-8")
         try:
             profile = json.loads(original)
             profile["models"]["plan-review"]["id"] = "anthropic/claude-sonnet-4-5"
+            profile["models"]["dev"]["id"] = "litellm/deepseek-v4-flash"
             profile["models"]["code-review"]["id"] = "openai/gpt-5.6"
+            profile["models"]["close"]["id"] = "litellm/sensenova-6.8-flash-lite"
             omp_json.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
             completed = self.dispatch(
                 "provision",
@@ -693,30 +699,28 @@ task.write_text(content, encoding='utf-8')
                 "omp",
                 "--target-dir",
                 str(target),
-                "--role",
-                "reviewer",
                 "--format",
                 "json",
             )
         finally:
             omp_json.write_text(original, encoding="utf-8")
         payload = json.loads(completed.stdout)
-        # 同别名模型值不一致告警应出现在 written 结果的 note 中
-        notes = [item.get("note") or "" for item in payload["results"]]
-        self.assertTrue(
-            any("不一致" in note and "anthropic/claude-sonnet-4-5" in note for note in notes),
-            f"模型值不一致告警未触发: {notes}",
-        )
-        # config.yml 应写入实际模型值（plan-review 先到的值）
+        # config.yml 应写入各阶段独立模型值（每阶段键不同，互不覆盖）
         config = (target / "config.yml").read_text(encoding="utf-8")
-        self.assertIn("anthropic/claude-sonnet-4-5", config)
+        self.assertIn("sage-plan-review: anthropic/claude-sonnet-4-5", config)
+        self.assertIn("sage-dev: litellm/deepseek-v4-flash", config)
+        self.assertIn("sage-code-review: openai/gpt-5.6", config)
+        self.assertIn("sage-close: litellm/sensenova-6.8-flash-lite", config)
         # JSON 结构断言（AC-1 要求）
         self.assertEqual(payload["adapter"], "omp")
         self.assertEqual(payload["target_dir"], str(target.resolve()))
         self.assertIn("omp.json", payload["models_source"])
         self.assertIsInstance(payload["post_steps"], list)
         self.assertGreaterEqual(len(payload["post_steps"]), 3)
-        self.assertEqual([item["role"] for item in payload["results"]], ["agent:reviewer", "config:modelroles"])
+        self.assertEqual(
+            [item["role"] for item in payload["results"]],
+            ["agent:plan-review", "agent:code-review", "agent:dev", "agent:close", "config:modelroles"],
+        )
 
 
 if __name__ == "__main__":

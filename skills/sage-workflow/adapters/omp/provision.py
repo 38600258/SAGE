@@ -9,11 +9,16 @@ OMP 的模型路由机制（以官方源码 docs/task-agent-discovery.md 为准�
   frontmatter `model: "@role"` 通过 `modelRoles.<role>` 解析到具体模型。
 - `modelRoles` 配置在 `~/.omp/agent/config.yml`（全局）或 `<cwd>/.omp/config.yml`（项目）。
 
+每阶段独立架构：4 个 SAGE 阶段各映射一个独立 agent + 独立 modelRoles 键，
+用户可在 omp.json `models.<phase>.id` 为每个阶段配置不同的实际模型标识符
+（如 anthropic/claude-sonnet-4-5、litellm/deepseek-v4-flash 等）。
+
 本脚本生成（--target-dir 指向 .omp/ 根目录）：
-1. `config.yml` —— modelRoles 段；模型值从 omp.json `models.<phase>.id` 读取（用户在 omp.json 填实际模型标识符，如 `anthropic/claude-sonnet-4-5`），未填写时写占位符并告警
-2. `agents/sage-reviewer.md` —— plan-review/code-review 用（model: "@sage-slow"）
-3. `agents/sage-coder.md` —— dev 用（model: "@sage-task"）
-4. `agents/sage-closer.md` —— close 用（model: "@sage-task"）
+1. `config.yml` —— modelRoles 段，每阶段独立键（sage-plan-review/sage-dev/sage-code-review/sage-close）
+2. `agents/sage-plan-review.md` —— plan-review 用
+3. `agents/sage-dev.md` —— dev 用
+4. `agents/sage-code-review.md` —— code-review 用
+5. `agents/sage-close.md` —— close 用
 
 双入口设计：
 - 独立运行：`python adapters/omp/provision.py --target-dir <repo>/.omp`
@@ -35,12 +40,16 @@ ROLE_PHASES: dict[str, tuple[str, ...]] = {
     "closer": ("close",),
 }
 
-# 角色 → modelRoles 角色别名（与 omp.json models.<phase>.id 互证）
-AGENT_MODEL_ROLE = {
-    "reviewer": "sage-slow",
-    "coder": "sage-task",
-    "closer": "sage-task",
+# 阶段 → modelRoles 角色键（每阶段独立；与 omp.json agent_types 一致）
+PHASE_MODEL_ROLE: dict[str, str] = {
+    "plan-review": "sage-plan-review",
+    "dev": "sage-dev",
+    "code-review": "sage-code-review",
+    "close": "sage-close",
 }
+
+# 阶段 → agent 名（frontmatter name；与 omp.json agent_types 值一致）
+PHASE_AGENT_NAME: dict[str, str] = PHASE_MODEL_ROLE
 
 AGENT_TOOLS = {
     "reviewer": "read, grep, glob, bash, web_search, lsp",
@@ -48,10 +57,11 @@ AGENT_TOOLS = {
     "closer": "read, write, edit, grep, glob, bash",
 }
 
-AGENT_DESCRIPTIONS = {
-    "reviewer": "SAGE reviewer 子代理（plan-review / code-review 阶段盲审）",
-    "coder": "SAGE coder 子代理（dev 阶段实现）",
-    "closer": "SAGE closer 子代理（close 阶段收尾）",
+AGENT_DESCRIPTIONS: dict[str, str] = {
+    "plan-review": "SAGE reviewer 子代理（plan-review 阶段计划盲审）",
+    "dev": "SAGE coder 子代理（dev 阶段实现）",
+    "code-review": "SAGE reviewer 子代理（code-review 阶段代码盲审）",
+    "close": "SAGE closer 子代理（close 阶段收尾）",
 }
 
 ROLE_BODY = {
@@ -92,7 +102,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--role",
         choices=PROVISION_ROLES,
-        help="只生成指定角色；缺省生成全部",
+        help="只生成指定角色（reviewer 生成 plan-review+code-review 两个 agent）；缺省生成全部",
     )
     parser.add_argument(
         "--force",
@@ -120,51 +130,36 @@ def load_omp_json() -> tuple[dict[str, Any], str]:
     return (models if isinstance(models, dict) else {}), str(candidate)
 
 
+def phase_role(phase: str) -> str:
+    """返回阶段所属角色（用于取 ROLE_BODY / AGENT_TOOLS）。"""
+    for role, phases in ROLE_PHASES.items():
+        if phase in phases:
+            return role
+    raise ValueError(f"未知阶段：{phase}")
+
+
 def build_config_yml(phases: list[str], models: dict[str, Any]) -> tuple[str, list[str]]:
-    """生成 config.yml 的 modelRoles 段；按角色别名去重。
+    """生成 config.yml 的 modelRoles 段；每阶段独立键。
 
     模型值从 omp.json models.<phase>.id 读取（用户填实际模型标识符，如 anthropic/claude-sonnet-4-5）。
-    同一别名下多个阶段的模型值必须一致，否则告警。未填写时写占位符并告警。
+    未填写时写占位符并告警。
     """
     warnings: list[str] = []
-    # role_alias -> SAGE 阶段列表（保留声明顺序）
-    alias_to_phases: dict[str, list[str]] = {}
-    # phase -> alias 反查表：ROLE_PHASES[role] 列出该角色的阶段，AGENT_MODEL_ROLE[role] 是其别名
-    phase_to_alias: dict[str, str] = {}
-    for role, role_phases in ROLE_PHASES.items():
-        for p in role_phases:
-            phase_to_alias[p] = AGENT_MODEL_ROLE[role]
-    # alias -> 用户在 omp.json 填写的模型标识符（同别名多阶段须一致）
-    alias_to_model: dict[str, str] = {}
-    for phase in phases:
-        alias = phase_to_alias[phase]
-        json_id = models.get(phase, {}).get("id") or ""
-        if json_id:
-            if alias in alias_to_model and alias_to_model[alias] != json_id:
-                warnings.append(
-                    f"角色别名 '{alias}' 下模型值不一致：{alias_to_model[alias]} vs {json_id}（来自 {phase}）"
-                )
-            else:
-                alias_to_model[alias] = json_id
-        else:
-            if alias not in alias_to_model:
-                alias_to_model[alias] = ""  # 占位符
-        alias_to_phases.setdefault(alias, []).append(phase)
-
     lines = [
         "# OMP modelRoles 配置（SAGE 适配器生成）",
-        "# 模型值来自 omp.json models.<phase>.id；将本段合并到 OMP config.yml。",
-        "# 跨模型异构盲审：将 sage-slow 配置为与 default（主会话模型）不同厂商的模型。",
+        "# 每阶段独立键；模型值来自 omp.json models.<phase>.id；将本段合并到 OMP config.yml。",
+        "# 跨模型异构盲审：将 plan-review/code-review 阶段的模型配为与 default（主会话模型）不同厂商的模型。",
         "",
         "modelRoles:",
     ]
-    for alias, phase_list in alias_to_phases.items():
-        model_val = alias_to_model.get(alias, "")
-        if model_val:
-            lines.append(f"  {alias}: {model_val}    # SAGE 阶段：{', '.join(phase_list)}")
+    for phase in phases:
+        alias = PHASE_MODEL_ROLE[phase]
+        json_id = models.get(phase, {}).get("id") or ""
+        if json_id:
+            lines.append(f"  {alias}: {json_id}    # SAGE 阶段：{phase}")
         else:
-            lines.append(f"  {alias}: <{alias}-provider/model>    # ⚠️ 未配置：请在 omp.json models 对应阶段填入模型标识符")
-            warnings.append(f"角色别名 '{alias}'（阶段 {', '.join(phase_list)}）未在 omp.json 配置模型标识符，已写占位符")
+            lines.append(f"  {alias}: <{alias}-provider/model>    # ⚠️ 未配置：请在 omp.json models.{phase}.id 填入模型标识符")
+            warnings.append(f"阶段 '{phase}' 未在 omp.json 配置模型标识符，已写占位符")
     advisor_desc = "可选第二遍审查角色；在 sage-*.md frontmatter 加 advisor: true 后生效；配置为第三厂商可实现三重异构审查"
     lines.append(f"  advisor: <advisor-provider/model>  # {advisor_desc}")
 
@@ -175,22 +170,22 @@ def build_config_yml(phases: list[str], models: dict[str, Any]) -> tuple[str, li
             "#       如需修改 default 模型，请在 config.yml 中单独设置。",
         ]
     )
-    if not alias_to_phases:
+    if not phases:
         warnings.append("未生成任何角色映射")
     return "\n".join(lines) + "\n", warnings
 
 
-def build_agent_md(role: str) -> str:
-    """生成单个角色的 agent 定义 Markdown（frontmatter + SAGE 角色契约正文）。"""
-    phases = ", ".join(ROLE_PHASES[role])
-    name = f"sage-{role}"
+def build_agent_md(phase: str) -> str:
+    """生成单个阶段的 agent 定义 Markdown（frontmatter + SAGE 角色契约正文）。"""
+    role = phase_role(phase)
+    name = PHASE_AGENT_NAME[phase]
     return (
         "---\n"
         f"name: {name}\n"
-        f"description: {AGENT_DESCRIPTIONS[role]}\n"
+        f"description: {AGENT_DESCRIPTIONS[phase]}\n"
         f"tools: {AGENT_TOOLS[role]}\n"
         'spawns: "*"\n'
-        f'model: "@{AGENT_MODEL_ROLE[role]}"\n'
+        f'model: "@{PHASE_MODEL_ROLE[phase]}"\n'
         "---\n"
         "\n"
         f"{ROLE_BODY[role]}\n"
@@ -198,7 +193,7 @@ def build_agent_md(role: str) -> str:
 
 
 def provision(args: argparse.Namespace) -> dict[str, Any]:
-    """按角色生成 agents/sage-<role>.md + config.yml；已存在且未 --force 时跳过，保证幂等可重入。"""
+    """按角色生成 agents/sage-<phase>.md + config.yml；已存在且未 --force 时跳过，保证幂等可重入。"""
     models, models_source = load_omp_json()
     roles = [args.role] if args.role else list(PROVISION_ROLES)
 
@@ -207,21 +202,22 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
     target_dir.mkdir(parents=True, exist_ok=True)
     agents_dir.mkdir(parents=True, exist_ok=True)
 
-    results: list[dict[str, Any]] = []
+    # 展开角色 → 阶段（reviewer 展开为 plan-review + code-review）
+    generated_phases: list[str] = []
     for role in roles:
-        content = build_agent_md(role)
-        target_path = agents_dir / f"sage-{role}.md"
+        generated_phases.extend(ROLE_PHASES[role])
+
+    results: list[dict[str, Any]] = []
+    for phase in generated_phases:
+        content = build_agent_md(phase)
+        target_path = agents_dir / f"{PHASE_AGENT_NAME[phase]}.md"
         if target_path.exists() and not args.force:
-            results.append({"role": f"agent:{role}", "path": str(target_path), "status": "skipped", "note": "已存在；使用 --force 覆盖"})
+            results.append({"role": f"agent:{phase}", "path": str(target_path), "status": "skipped", "note": "已存在；使用 --force 覆盖"})
             continue
         target_path.write_text(content, encoding="utf-8")
-        results.append({"role": f"agent:{role}", "path": str(target_path), "status": "written", "note": None})
+        results.append({"role": f"agent:{phase}", "path": str(target_path), "status": "written", "note": None})
 
     # config.yml（modelRoles 段）：按被生成角色的阶段收集
-    generated_roles = list(PROVISION_ROLES) if not args.role else [args.role]
-    generated_phases: list[str] = []
-    for role in generated_roles:
-        generated_phases.extend(ROLE_PHASES[role])
     config_content, warnings = build_config_yml(generated_phases, models)
 
     config_path = target_dir / "config.yml"
@@ -242,9 +238,9 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
 
     post_steps = [
         "将 config.yml 的 modelRoles 段合并到 OMP 实际配置（全局 ~/.omp/agent/config.yml 或项目 <repo>/.omp/config.yml）。",
-        "如 omp.json 中某阶段 models.id 为 null，config.yml 对应角色为占位符 <provider/model>；请在 omp.json 填入实际模型标识符后重新 provision，或直接编辑 config.yml 替换占位符。",
+        "如 omp.json 中某阶段 models.id 为 null，config.yml 对应阶段角色为占位符 <provider/model>；请在 omp.json 填入实际模型标识符后重新 provision，或直接编辑 config.yml 替换占位符。",
         "确认 agents/sage-*.md 位于 <repo>/.omp/agents/ 下；OMP 从该目录发现自定义 agent（项目优先于用户级与内置）。",
-        "重启或刷新 OMP；在 /agents 面板确认 sage-reviewer/sage-coder/sage-closer 可见，在 /model 的 Roles 视图确认 sage-slow/sage-task 角色。",
+        "重启或刷新 OMP；在 /agents 面板确认 sage-plan-review/sage-dev/sage-code-review/sage-close 可见，在 /model 的 Roles 视图确认同名角色。",
         "跨模型异构盲审：将 omp.json 中 plan-review/code-review 阶段的 models.id 配置为与 default（主会话模型）不同厂商的模型。",
         "本脚本不修改 OMP 实际配置；所有变更由用户手动合并放置。",
     ]

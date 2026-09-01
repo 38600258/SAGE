@@ -6,15 +6,15 @@
     "supported": true,
     "invoker": "host",
     "agent_types": {
-      "plan-review": "sage-reviewer",
-      "dev": "sage-coder",
-      "code-review": "sage-reviewer",
-      "close": "sage-closer"
+      "plan-review": "sage-plan-review",
+      "dev": "sage-dev",
+      "code-review": "sage-code-review",
+      "close": "sage-close"
     }
   },
   "models": {
     "plan-review": {
-      "id": "anthropic/claude-sonnet-4-5",
+      "id": "litellm/glm-5.2",
       "subagent_binding": "agent-registration",
       "cli_binding": "none"
     },
@@ -24,12 +24,12 @@
       "cli_binding": "none"
     },
     "code-review": {
-      "id": "anthropic/claude-sonnet-4-5",
+      "id": "litellm/glm-5.2",
       "subagent_binding": "agent-registration",
       "cli_binding": "none"
     },
     "close": {
-      "id": "litellm/deepseek-v4-flash",
+      "id": "litellm/sensenova-6.8-flash-lite",
       "subagent_binding": "agent-registration",
       "cli_binding": "none"
     }
