@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -577,6 +578,141 @@ task.write_text(content, encoding='utf-8')
         self.assertEqual([item["role"] for item in payload["results"]], ["coder"])
         self.assertTrue((target / "sage-coder.md").is_file())
         self.assertFalse((target / "sage-reviewer.md").exists())
+
+    def test_provision_omp_generates_agents_and_config_skips_existing(self) -> None:
+        """OMP provision 生成 .omp/ 三件套（config.yml + 3 个 agent .md），幂等不覆盖，--force 覆盖。"""
+        target = Path(self.temp_dir.name) / "omp-config"
+        completed = self.dispatch(
+            "provision",
+            "--adapter",
+            "omp",
+            "--target-dir",
+            str(target),
+            "--format",
+            "json",
+        )
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["adapter"], "omp")
+        statuses = {item["role"]: item["status"] for item in payload["results"]}
+        self.assertEqual(
+            statuses,
+            {
+                "agent:reviewer": "written",
+                "agent:coder": "written",
+                "agent:closer": "written",
+                "config:modelroles": "written",
+            },
+        )
+        # 产物齐全
+        self.assertTrue((target / "config.yml").is_file())
+        for name in ("sage-reviewer", "sage-coder", "sage-closer"):
+            self.assertTrue((target / "agents" / f"{name}.md").is_file())
+        # config.yml 含 modelRoles 角色别名（去重：sage-slow 出现 1 次、sage-task 出现 1 次）
+        config = (target / "config.yml").read_text(encoding="utf-8")
+        self.assertIn("modelRoles:", config)
+        self.assertEqual(len(re.findall(r"^\s+sage-slow:", config, re.MULTILINE)), 1)
+        self.assertEqual(len(re.findall(r"^\s+sage-task:", config, re.MULTILINE)), 1)
+        # agent frontmatter 的 model 别名正确
+        reviewer = (target / "agents" / "sage-reviewer.md").read_text(encoding="utf-8")
+        self.assertIn('name: sage-reviewer', reviewer)
+        self.assertIn('model: "@sage-slow"', reviewer)
+        coder = (target / "agents" / "sage-coder.md").read_text(encoding="utf-8")
+        self.assertIn('model: "@sage-task"', coder)
+
+        # 幂等：未 --force 时全部 skipped
+        completed = self.dispatch(
+            "provision",
+            "--adapter",
+            "omp",
+            "--target-dir",
+            str(target),
+            "--format",
+            "json",
+        )
+        payload = json.loads(completed.stdout)
+        statuses = {item["role"]: item["status"] for item in payload["results"]}
+        self.assertTrue(all(s == "skipped" for s in statuses.values()), statuses)
+
+        # --force 覆盖
+        completed = self.dispatch(
+            "provision",
+            "--adapter",
+            "omp",
+            "--target-dir",
+            str(target),
+            "--force",
+            "--format",
+            "json",
+        )
+        payload = json.loads(completed.stdout)
+        statuses = {item["role"]: item["status"] for item in payload["results"]}
+        self.assertTrue(all(s == "written" for s in statuses.values()), statuses)
+
+    def test_provision_omp_role_filter_generates_single_agent(self) -> None:
+        """OMP provision --role reviewer 只生成 sage-reviewer.md 与对应 config.yml 角色段。"""
+        target = Path(self.temp_dir.name) / "omp-role-filter"
+        completed = self.dispatch(
+            "provision",
+            "--adapter",
+            "omp",
+            "--target-dir",
+            str(target),
+            "--role",
+            "reviewer",
+            "--format",
+            "json",
+        )
+        payload = json.loads(completed.stdout)
+        statuses = {item["role"]: item["status"] for item in payload["results"]}
+        self.assertEqual(
+            statuses,
+            {"agent:reviewer": "written", "config:modelroles": "written"},
+        )
+        # 只生成 reviewer agent，不生成 coder/closer
+        self.assertTrue((target / "agents" / "sage-reviewer.md").is_file())
+        self.assertFalse((target / "agents" / "sage-coder.md").exists())
+        # config.yml 只含 sage-slow（reviewer 角色别名），不含 sage-task
+        config = (target / "config.yml").read_text(encoding="utf-8")
+        self.assertIn("sage-slow:", config)
+        self.assertNotIn("sage-task:", config)
+
+    def test_provision_omp_cross_consistency_and_json_structure(self) -> None:
+        """OMP provision：omp.json models.id 与角色别名不一致时触发 warning；JSON 输出结构含 post_steps/target_dir/models_source。"""
+        target = Path(self.temp_dir.name) / "omp-consistency"
+        # 篡改 omp.json 的 plan-review.id 制造不一致，运行后恢复
+        omp_json = SKILL_ROOT / "adapters" / "omp" / "omp.json"
+        original = omp_json.read_text(encoding="utf-8")
+        try:
+            profile = json.loads(original)
+            profile["models"]["plan-review"]["id"] = "WRONG-ROLE"
+            omp_json.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
+            completed = self.dispatch(
+                "provision",
+                "--adapter",
+                "omp",
+                "--target-dir",
+                str(target),
+                "--role",
+                "reviewer",
+                "--format",
+                "json",
+            )
+        finally:
+            omp_json.write_text(original, encoding="utf-8")
+        payload = json.loads(completed.stdout)
+        # 互证告警应出现在 written 结果的 note 中
+        notes = [item.get("note") or "" for item in payload["results"]]
+        self.assertTrue(
+            any("不一致" in note and "WRONG-ROLE" in note for note in notes),
+            f"互证告警未触发: {notes}",
+        )
+        # JSON 结构断言（AC-1 要求）
+        self.assertEqual(payload["adapter"], "omp")
+        self.assertEqual(payload["target_dir"], str(target.resolve()))
+        self.assertIn("omp.json", payload["models_source"])
+        self.assertIsInstance(payload["post_steps"], list)
+        self.assertGreaterEqual(len(payload["post_steps"]), 3)
+        self.assertEqual([item["role"] for item in payload["results"]], ["agent:reviewer", "config:modelroles"])
 
 
 if __name__ == "__main__":

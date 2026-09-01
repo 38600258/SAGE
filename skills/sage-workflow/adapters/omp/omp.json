@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "omp",
+  "display_name": "Oh My Pi",
+  "native_subagent": {
+    "supported": true,
+    "invoker": "host",
+    "agent_types": {
+      "plan-review": "sage-reviewer",
+      "dev": "sage-coder",
+      "code-review": "sage-reviewer",
+      "close": "sage-closer"
+    }
+  },
+  "models": {
+    "plan-review": {
+      "id": "sage-slow",
+      "subagent_binding": "agent-registration",
+      "cli_binding": "none"
+    },
+    "dev": {
+      "id": "sage-task",
+      "subagent_binding": "agent-registration",
+      "cli_binding": "none"
+    },
+    "code-review": {
+      "id": "sage-slow",
+      "subagent_binding": "agent-registration",
+      "cli_binding": "none"
+    },
+    "close": {
+      "id": "sage-task",
+      "subagent_binding": "agent-registration",
+      "cli_binding": "none"
+    }
+  },
+  "cli": {
+    "supported": false,
+    "invoker": "none"
+  }
+}
