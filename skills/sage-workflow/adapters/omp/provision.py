@@ -10,7 +10,7 @@ OMP 的模型路由机制（以官方源码 docs/task-agent-discovery.md 为准�
 - `modelRoles` 配置在 `~/.omp/agent/config.yml`（全局）或 `<cwd>/.omp/config.yml`（项目）。
 
 本脚本生成（--target-dir 指向 .omp/ 根目录）：
-1. `config.yml` —— modelRoles 段（sage-slow/sage-task/advisor 固定键，含占位符）
+1. `config.yml` —— modelRoles 段；模型值从 omp.json `models.<phase>.id` 读取（用户在 omp.json 填实际模型标识符，如 `anthropic/claude-sonnet-4-5`），未填写时写占位符并告警
 2. `agents/sage-reviewer.md` —— plan-review/code-review 用（model: "@sage-slow"）
 3. `agents/sage-coder.md` —— dev 用（model: "@sage-task"）
 4. `agents/sage-closer.md` —— close 用（model: "@sage-task"）
@@ -108,7 +108,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_omp_json() -> tuple[dict[str, Any], str]:
-    """从脚本同目录 omp.json 读取 models 声明（models.<phase>.id 用于互证告警）；缺失或无效时回退为空并提示。"""
+    """从脚本同目录 omp.json 读取 models 声明（models.<phase>.id 是用户填写的实际模型标识符，如 anthropic/claude-sonnet-4-5）；缺失或无效时回退为空并提示。"""
     candidate = Path(__file__).resolve().parent / "omp.json"
     if not candidate.is_file():
         return {}, f"无（未找到 {candidate}）"
@@ -121,7 +121,11 @@ def load_omp_json() -> tuple[dict[str, Any], str]:
 
 
 def build_config_yml(phases: list[str], models: dict[str, Any]) -> tuple[str, list[str]]:
-    """生成 config.yml 的 modelRoles 段；按角色别名去重。"""
+    """生成 config.yml 的 modelRoles 段；按角色别名去重。
+
+    模型值从 omp.json models.<phase>.id 读取（用户填实际模型标识符，如 anthropic/claude-sonnet-4-5）。
+    同一别名下多个阶段的模型值必须一致，否则告警。未填写时写占位符并告警。
+    """
     warnings: list[str] = []
     # role_alias -> SAGE 阶段列表（保留声明顺序）
     alias_to_phases: dict[str, list[str]] = {}
@@ -130,28 +134,37 @@ def build_config_yml(phases: list[str], models: dict[str, Any]) -> tuple[str, li
     for role, role_phases in ROLE_PHASES.items():
         for p in role_phases:
             phase_to_alias[p] = AGENT_MODEL_ROLE[role]
+    # alias -> 用户在 omp.json 填写的模型标识符（同别名多阶段须一致）
+    alias_to_model: dict[str, str] = {}
     for phase in phases:
         alias = phase_to_alias[phase]
-        json_id = models.get(phase, {}).get("id", "")
-        if json_id and json_id != alias:
-            warnings.append(
-                f"{phase} 阶段：omp.json models.{phase}.id='{json_id}' "
-                f"与 provision 角色别名 '{alias}' 不一致"
-            )
+        json_id = models.get(phase, {}).get("id") or ""
+        if json_id:
+            if alias in alias_to_model and alias_to_model[alias] != json_id:
+                warnings.append(
+                    f"角色别名 '{alias}' 下模型值不一致：{alias_to_model[alias]} vs {json_id}（来自 {phase}）"
+                )
+            else:
+                alias_to_model[alias] = json_id
+        else:
+            if alias not in alias_to_model:
+                alias_to_model[alias] = ""  # 占位符
         alias_to_phases.setdefault(alias, []).append(phase)
 
     lines = [
         "# OMP modelRoles 配置（SAGE 适配器生成）",
-        "# 说明：将下列 modelRoles 段与你的 OMP config.yml 合并；将 <PLACEHOLDER> 替换为实际模型标识符。",
-        "# 各占位符应替换为 provider/model 格式（如 litellm/gpt-5、openai/gpt-5.6 等）。",
+        "# 模型值来自 omp.json models.<phase>.id；将本段合并到 OMP config.yml。",
         "# 跨模型异构盲审：将 sage-slow 配置为与 default（主会话模型）不同厂商的模型。",
         "",
         "modelRoles:",
     ]
     for alias, phase_list in alias_to_phases.items():
-        lines.append(
-            f"  {alias}: <{alias}-provider/model>    # SAGE 阶段：{', '.join(phase_list)}"
-        )
+        model_val = alias_to_model.get(alias, "")
+        if model_val:
+            lines.append(f"  {alias}: {model_val}    # SAGE 阶段：{', '.join(phase_list)}")
+        else:
+            lines.append(f"  {alias}: <{alias}-provider/model>    # ⚠️ 未配置：请在 omp.json models 对应阶段填入模型标识符")
+            warnings.append(f"角色别名 '{alias}'（阶段 {', '.join(phase_list)}）未在 omp.json 配置模型标识符，已写占位符")
     advisor_desc = "可选第二遍审查角色；在 sage-*.md frontmatter 加 advisor: true 后生效；配置为第三厂商可实现三重异构审查"
     lines.append(f"  advisor: <advisor-provider/model>  # {advisor_desc}")
 
@@ -229,10 +242,10 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
 
     post_steps = [
         "将 config.yml 的 modelRoles 段合并到 OMP 实际配置（全局 ~/.omp/agent/config.yml 或项目 <repo>/.omp/config.yml）。",
-        "将所有 <PLACEHOLDER> 替换为实际的 provider/model 标识符。",
+        "如 omp.json 中某阶段 models.id 为 null，config.yml 对应角色为占位符 <provider/model>；请在 omp.json 填入实际模型标识符后重新 provision，或直接编辑 config.yml 替换占位符。",
         "确认 agents/sage-*.md 位于 <repo>/.omp/agents/ 下；OMP 从该目录发现自定义 agent（项目优先于用户级与内置）。",
         "重启或刷新 OMP；在 /agents 面板确认 sage-reviewer/sage-coder/sage-closer 可见，在 /model 的 Roles 视图确认 sage-slow/sage-task 角色。",
-        "跨模型异构盲审：将 modelRoles.sage-slow 配置为与 default 不同厂商的模型。",
+        "跨模型异构盲审：将 omp.json 中 plan-review/code-review 阶段的 models.id 配置为与 default（主会话模型）不同厂商的模型。",
         "本脚本不修改 OMP 实际配置；所有变更由用户手动合并放置。",
     ]
 

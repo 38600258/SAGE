@@ -677,14 +677,15 @@ task.write_text(content, encoding='utf-8')
         self.assertNotIn("sage-task:", config)
 
     def test_provision_omp_cross_consistency_and_json_structure(self) -> None:
-        """OMP provision：omp.json models.id 与角色别名不一致时触发 warning；JSON 输出结构含 post_steps/target_dir/models_source。"""
+        """OMP provision：同别名（sage-slow）下 plan-review 与 code-review 模型值不一致时触发 warning；JSON 输出结构含 post_steps/target_dir/models_source。"""
         target = Path(self.temp_dir.name) / "omp-consistency"
-        # 篡改 omp.json 的 plan-review.id 制造不一致，运行后恢复
+        # 篡改 omp.json：plan-review 和 code-review 同属 sage-slow 别名，填不同模型值制造不一致
         omp_json = SKILL_ROOT / "adapters" / "omp" / "omp.json"
         original = omp_json.read_text(encoding="utf-8")
         try:
             profile = json.loads(original)
-            profile["models"]["plan-review"]["id"] = "WRONG-ROLE"
+            profile["models"]["plan-review"]["id"] = "anthropic/claude-sonnet-4-5"
+            profile["models"]["code-review"]["id"] = "openai/gpt-5.6"
             omp_json.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
             completed = self.dispatch(
                 "provision",
@@ -700,12 +701,15 @@ task.write_text(content, encoding='utf-8')
         finally:
             omp_json.write_text(original, encoding="utf-8")
         payload = json.loads(completed.stdout)
-        # 互证告警应出现在 written 结果的 note 中
+        # 同别名模型值不一致告警应出现在 written 结果的 note 中
         notes = [item.get("note") or "" for item in payload["results"]]
         self.assertTrue(
-            any("不一致" in note and "WRONG-ROLE" in note for note in notes),
-            f"互证告警未触发: {notes}",
+            any("不一致" in note and "anthropic/claude-sonnet-4-5" in note for note in notes),
+            f"模型值不一致告警未触发: {notes}",
         )
+        # config.yml 应写入实际模型值（plan-review 先到的值）
+        config = (target / "config.yml").read_text(encoding="utf-8")
+        self.assertIn("anthropic/claude-sonnet-4-5", config)
         # JSON 结构断言（AC-1 要求）
         self.assertEqual(payload["adapter"], "omp")
         self.assertEqual(payload["target_dir"], str(target.resolve()))

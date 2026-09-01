@@ -14,22 +14,22 @@
   },
   "models": {
     "plan-review": {
-      "id": "sage-slow",
+      "id": "anthropic/claude-sonnet-4-5",
       "subagent_binding": "agent-registration",
       "cli_binding": "none"
     },
     "dev": {
-      "id": "sage-task",
+      "id": "litellm/deepseek-v4-flash",
       "subagent_binding": "agent-registration",
       "cli_binding": "none"
     },
     "code-review": {
-      "id": "sage-slow",
+      "id": "anthropic/claude-sonnet-4-5",
       "subagent_binding": "agent-registration",
       "cli_binding": "none"
     },
     "close": {
-      "id": "sage-task",
+      "id": "litellm/deepseek-v4-flash",
       "subagent_binding": "agent-registration",
       "cli_binding": "none"
     }
