@@ -13,3 +13,6 @@ Thumbs.db
 
 # SAGE linter 运行日志
 .sage/
+
+# SAGE provision 产物：运行时生成，不入版本库（T-025 遗留债，T-024 一次性修复）
+.omp/
