@@ -83,7 +83,7 @@ Reviewer 执行载体应直接写回 TASK 文档：计划盲审写入 2.1 节，
 |------|--------|----------|----------|----------|
 | Antigravity | UI 主 agent + subagent/CLI | 执行通道配置 | reviewer CLI | `AGENTS.md` |
 | Codex app | Codex 主会话 + SAGE subagent | 执行通道配置 | CLI fallback | `AGENTS.md` |
-| OMP | 主会话 + 自定义 agent（agent-registration，provision 生成 .omp/agents/sage-*.md） | native_subagent（sage-reviewer via @sage-slow / sage-coder、sage-closer via @sage-task） | generic-tool injected | `AGENTS.md` + `omp.json` + `.omp/` |
+| OMP | 主会话 + 自定义 agent（agent-registration，provision 生成 .omp/agents/sage-*.md） | native_subagent（sage_reviewer via @sage_reviewer / sage_coder、sage_closer via @sage_coder、@sage_closer） | generic-tool injected | `AGENTS.md` + `omp.json` + `.omp/` |
 
 ---
 

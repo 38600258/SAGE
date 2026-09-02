@@ -175,7 +175,7 @@ uv run python scripts/sage_dispatch.py provision --repo-root <repo> --adapter co
 # Claude Code 等项目内 agents 目录（随仓库版本化）
 uv run python scripts/sage_dispatch.py provision --repo-root <repo> --adapter claude-code --target-dir <repo>\.claude\agents
 
-# OMP 项目 .omp/ 目录三件套（config.yml modelRoles + agents/sage-*.md；模型标识符由用户替换占位符后合并）
+# OMP 项目 .omp/ 目录三件套（config.yml modelRoles + agents/sage_reviewer/sage_coder/sage_closer.md；模型值直接来自 omp.json models.<phase>.id）
 uv run python scripts/sage_dispatch.py provision --repo-root <repo> --adapter omp --target-dir <repo>\.omp
 ```
 

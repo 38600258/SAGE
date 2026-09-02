@@ -2,8 +2,8 @@
 """Codex 适配器子代理生成器：生成 Codex 宿主的 TOML agent 注册文件。
 
 双入口设计：
-- 独立运行：`python adapters/codex/provision.py --target-dir <agents 目录>`（模型取自同目录 codex.json）
-- 委托运行：`core/scripts/dispatch_phase.py provision --adapter codex ...`（主入口以 subprocess 调用本脚本）
+- 独立运行：`python adapters/codex/provision.py`（默认项目目录 <当前目录>/.codex/agents）或 `--user`（用户目录 ~/.codex/agents）
+- 委托运行：`core/scripts/dispatch_phase.py provision --adapter codex ...`（主入口以 subprocess 调用本脚本，显式传 --target-dir）
 """
 
 from __future__ import annotations
@@ -40,12 +40,20 @@ ROLE_INSTRUCTIONS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="生成 Codex 宿主 TOML agent 注册文件")
-    parser.add_argument("--target-dir", required=True, type=Path, help="宿主注册目录（如 ~/.codex/agents）")
+    parser.add_argument("--target-dir", type=Path, default=None, help="宿主注册目录（如 ~/.codex/agents 或项目 .codex/agents）；不指定时默认 <当前目录>/.codex/agents")
+    parser.add_argument("--user", action="store_true", help="部署到宿主用户注册目录（~/.codex/agents），而非项目目录；与 --target-dir 互斥")
     parser.add_argument("--model-provider", help="TOML 模板的 model_provider，默认 codex_shim")
     parser.add_argument("--role", choices=PROVISION_ROLES, help="只生成指定角色；缺省生成全部")
     parser.add_argument("--force", action="store_true", help="覆盖已存在的注册文件")
     parser.add_argument("--format", choices=("text", "json"), default="text")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.user and args.target_dir is not None:
+        parser.error("--user 与 --target-dir 互斥，不能同时指定")
+    if args.user:
+        args.target_dir = Path.home() / ".codex" / "agents"
+    elif args.target_dir is None:
+        args.target_dir = Path.cwd() / ".codex" / "agents"
+    return args
 
 
 def load_models() -> tuple[dict[str, Any], str]:
@@ -102,7 +110,7 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
     target_dir.mkdir(parents=True, exist_ok=True)
     results: list[dict[str, Any]] = []
     for role in roles:
-        filename = f"sage-{role}.toml"
+        filename = f"sage_{role}.toml"
         content, warning = build_toml_agent(role, models, provider)
         target_path = target_dir / filename
         if target_path.exists() and not args.force:
@@ -113,7 +121,7 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
     post_steps = [
         "重启或刷新宿主以加载新的 agent 注册；注册是否生效以宿主实际派发结果为准。",
         "注册型模型变更必须同步 adapter JSON（models.<phase>），避免双源漂移。",
-        "若目标目录位于宿主全局配置区（如 ~/.codex/agents），请人工确认放置位置，Skill 不代写工作区外配置。",
+        f"目标目录为 {'~/.codex/agents（宿主用户注册目录，--user）' if args.user else '<当前目录>/.codex/agents（项目目录）'}；项目目录随仓库版本管理，用户目录为全局配置，请人工确认放置位置。",
     ]
     return {
         "adapter": "codex",
