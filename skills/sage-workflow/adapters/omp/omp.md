@@ -36,13 +36,15 @@ task 工具派发 agent: "sage_reviewer"
 
 未填写（`null`）时，provision 在 config.yml 对应角色写占位符并告警，用户可在 omp.json 补填后重新 provision，或直接编辑 config.yml 替换占位符。
 
-### 模型路由实际生效范围（当前限制）
+### 模型路由实际生效范围
 
-> SAGE 工作流的编排契约（`orchestrator.md` 等级表）当前将 L2 的 dev/close 标为「coder/closer 可子代理化」（可选），实际由 Main Agent（本会话）承担，**不派发 sage_coder/sage_closer 子代理**。因此：
-> - ✅ **plan-review / code-review**：派发 sage_reviewer → modelRoles.sage_reviewer 键 → 异构模型（**生效**）
-> - ❌ **dev / close**：由 Main Agent 承担，走会话 default 模型；sage_coder/sage_closer 的 modelRoles 键为**预留位**，当前不消费
+> 四阶段均派发，全部 modelRoles 键生效（T-024 落地，编排契约束缚见 orchestrator.md——dev/close 为「coder/closer 必须子代理化」，主代理不得代行执行角色）：
+> - ✅ **plan-review**：sage_reviewer → modelRoles.sage_reviewer → 异构模型（**生效**）
+> - ✅ **dev**：sage_coder → modelRoles.sage_coder → 异构模型（**生效**，T-024 后）
+> - ✅ **code-review**：sage_reviewer → modelRoles.sage_reviewer → 异构模型（**生效**）
+> - ✅ **close**：sage_closer → modelRoles.sage_closer → 异构模型（**生效**，T-024 后）
 >
-> 此为编排层既有行为（T-008 至今未改），非本适配器缺陷。已登记 T-024 修复：让 dev/close 也走 dispatcher 派发，使四阶段模型路由完整生效。修复前，**只有盲审两阶段能实现跨厂商异构**。
+> dev/close 阶段同样派发执行型子代理，四阶段跨厂商异构模型路由完整生效。
 
 角色配置位置（OMP settings 文档验证）：
 

@@ -96,7 +96,7 @@
 
 | 文件 | 定位 | 依赖 |
 |---|---|---|
-| `sage_linter.py` | 质量门禁（17 个检查器） | 仅 Python 标准库 + git |
+| `sage_linter.py` | 质量门禁（19 个检查器） | 仅 Python 标准库 + git |
 | `dispatch_phase.py` | 跨宿主阶段派发协议层 | 仅 Python 标准库 + git |
 | `bootstrap_sage.py` | 将默认发行版复制进新项目 | 仅 Python 标准库 + git |
 | `tests/test_dispatch_phase.py` | dispatch 的 `unittest` 测试 | unittest |
@@ -115,7 +115,7 @@
 
 ### 4.1 `sage_linter.py` — 质量门禁
 
-**作用**：集中了方法论要求的 **17 个检查器**，用于校验任务文档、分支隔离、提交信息、文档健康度等。
+**作用**：集中了方法论要求的 **19 个检查器**，用于校验任务文档、分支隔离、提交信息、文档健康度等。
 
 #### 全局常量
 
@@ -150,7 +150,7 @@
 - 输出：`flush_text()` / `flush_json()` / `flush_artifact()`（Markdown 报告）/ `flush()`；fail/warn 在三种格式中统一携带 `[SAGE-XX]` 规则 ID（json 为独立 `rule_id` 字段）。
 - 启发式判定披露：风险扩展/盲审完整性/执行通道记录/模型元数据四个检查器的 fail 消息自述命中依据（命中的占位词、完整判定词表、要求的标题/行格式）；判定语义与词表内容不变（T-014）。
 
-#### 17 个检查器（模块的"大脑"）
+#### 19 个检查器（模块的"大脑"）
 
 | # | 函数 | 校验内容 |
 |---|---|---|
@@ -172,6 +172,7 @@
 | 15 | `check_execution_channel_records` | L1+ 已到达阶段必须记录角色契约/执行通道/偏离（阶段解析经 `_parse_current_stage`——TD-9：元数据为模板默认值时阻断并披露） |
 | 16 | `check_unit_tests` | `--all` 场景以子进程真实执行单测套件（TD-3：失败/超时即阻断；无 tests 目录则跳过） |
 | 18 | `check_plan_clearance` | L1/L2 任务 dev 及之后必须元数据「计划放行」=已放行（T-018 人类掌舵点；阶段感知：init/plan-review 未到期、L0/L3 豁免、模板默认阶段跳过——「待放行」为合法初始值、缺失/未放行 fail-safe 阻断；解析经 `_parse_plan_clearance` 整行捕获。rule ID 契约：标签 [17/17] 显式映射 SAGE-18、场景 A 标 "18."，SAGE-17 为 hook 保留段；--all 输出序号 [17/17] 先于 [16/17] 单元测试出现（task_checkers 块在单测之前执行）属注册序错位，备案知悉） |
+| 19 | `check_clearance_request_record` | 放行请求五要素原文必须落盘 TASK 文档（T-024；L2 写入 2.x 节固定小节「计划放行请求」、L1 写入 1.5 后固定小节同名；阶段感知：dev/code-review/close 到期强制、init/plan-review 未到期跳过、L0/L3 豁免；缺失落盘小节或缺少五要素关键词即阻断。rule ID 契约：标签 [19/19] 显式映射 SAGE-19） |
 
 #### 主入口 `main()`
 

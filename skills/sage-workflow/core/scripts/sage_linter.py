@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SAGE 工作流检查器 (SAGE Linter)
 
-此脚本集成了方法论中要求的所有 17 个检查器，不依赖任何第三方 Python 库，
+此脚本集成了方法论中要求的所有 19 个检查器，不依赖任何第三方 Python 库，
 仅使用标准库及本地 git 命令。可以在任何智能体或人类开发流程中独立运行。
 
 SAGE = Steer, Agent Goes Execute (人类掌舵，智能体执行)
@@ -321,7 +321,7 @@ class ResultCollector:
 
 
 # ==============================================================================
-# 17 个检查器核心实现
+# 19 个检查器核心实现
 # ==============================================================================
 
 def check_template_copy(task_file, template_file):
@@ -1355,6 +1355,111 @@ def check_plan_clearance(task_file):
         "代理不得代填放行记录。"
     )
 
+
+_CLEARANCE_REQUEST_HEADING = "计划放行请求"
+# 放行请求五要素关键词（T-024 判定矩阵，与 planner.md 第 8 节固定五要素对齐）：
+# 目标/可写清单/自决清单/风险概览/盲审结论。用正则做容错匹配（允许「可写文件清单」
+# 「自决项清单」「风险与缓解概览」等既有措辞），避免对同义词误报也避免漏报。
+# 每个键为关键词展示名，值为命中正则；缺失时以展示名披露缺失项。
+_CLEARANCE_REQUEST_KEYWORDS = {
+    "目标": r"目标",
+    "可写清单": r"可写.{0,4}清单",
+    "自决清单": r"自决.{0,4}清单",
+    "风险概览": r"风险.{0,8}概览",
+    "盲审结论": r"盲审结论",
+}
+
+
+def _extract_clearance_request_record(content: str, risk_level: str) -> str | None:
+    """从 TASK 文档提取放行请求落盘小节正文。
+
+    落盘位置（T-024，与 planner.md 第 8 节「落盘要求」一致）：
+    - L2 → 2.x 节固定小节「计划放行请求」（如 `### 2.2 计划放行请求`）
+    - L1 → 1.5 后固定小节同名（如 `### 1.6 计划放行请求`）
+    按小节标题精确定位（标题行即「计划放行请求」），提取到下一个 `###` 标题为止，
+    避免把 2.x/1.5 节其他内容误纳入关键词检测范围造成误判。
+    返回小节正文；未找到小节返回 None（由调用方按 fail-safe 阻断）。
+    """
+    pattern = r"^###\s*2\.\d+\s*" + _CLEARANCE_REQUEST_HEADING if risk_level == "L2" else \
+        r"^###\s*1\.(?:[6-9]|\d{2,})\s*" + _CLEARANCE_REQUEST_HEADING
+    section_start = re.search(pattern, content, flags=re.MULTILINE)
+    if not section_start:
+        return None
+    next_heading = re.search(r"^###\s", content[section_start.end():], flags=re.MULTILINE)
+    if next_heading:
+        return content[section_start.end():section_start.end() + next_heading.start()]
+    return content[section_start.end():]
+
+
+def check_clearance_request_record(task_file):
+    """19. 放行请求落盘校验: L1/L2 任务 dev 及之后，放行请求五要素原文必须落盘 TASK 文档
+
+    （T-024 人类掌舵点可追溯性：ask 弹窗瞬逝无法追溯「当时放了什么行」，五要素原文
+    必须写入 TASK 文档持久化，不依赖弹窗；与 SAGE-18 check_plan_clearance 互补——
+    SAGE-18 校验「已放行」状态，本检查器校验「放行请求原文已落盘」）
+
+    编号口径：清单编号与 --check-task 场景 A 标签为 19.；--all 场景 B 标签为 [19/19]
+    （任务级注册序），经 ResultCollector.add 显式 rule_id 映射 SAGE-19。
+
+    判定矩阵：
+    - 到期：当前阶段 ∈ {dev, code-review, close} 且风险等级 ∈ {L1, L2}（或等级缺失
+      fail-safe 强制）→ 检查落盘位置存在放行请求五要素关键词
+    - 未到期：init / plan-review → 跳过（放行请求时点尚未发生，属预期）
+    - 跳过：L0（不适用）；L3（每阶段人工确认已覆盖）；当前阶段为模板默认行
+      （任务尚处 init 模板态，「待放行」为合法初始值，无进 dev 暴露）
+    - fail-safe：当前阶段字段缺失或未知阶段值 → 阻断（维持既有最严侧强制语义，
+      与 check_plan_clearance 同构）
+    - 落盘位置：L2 → 2.x 节固定小节「计划放行请求」；L1 → 1.5 后固定小节同名；
+      关键词检测用包含关系（目标/可写清单/自决清单/风险概览/盲审结论），避免误报
+    """
+    task_path = Path(task_file)
+    if not task_path.exists():
+        return False, f"任务文档不存在: {task_file}"
+
+    content = "".join(get_file_lines(task_path))
+
+    risk_match = re.search(r'-\s*\*\*风险等级\*\*:\s*(L0|L1|L2|L3)', content)
+    if not risk_match:
+        risk_match = re.search(r'风险等级\s*[:：]\s*(L0|L1|L2|L3)', content)
+    risk_level = risk_match.group(1) if risk_match else "L2"
+
+    if risk_level == "L0":
+        return True, "L0 任务不适用放行请求落盘校验，跳过校验。"
+    if risk_level == "L3":
+        return True, "L3 任务由每阶段人工确认覆盖，跳过放行请求落盘校验。"
+
+    current_stage, stage_is_default = _parse_current_stage(content)
+    if stage_is_default:
+        return True, (
+            "💡 提示：当前阶段元数据仍为模板默认值（任务尚处 init 模板态），"
+            "放行请求落盘校验未到期，跳过校验。"
+        )
+    if current_stage in ("init", "plan-review"):
+        return True, f"💡 提示：当前阶段为 {current_stage}，放行请求落盘校验未到期，跳过校验。"
+
+    # 到期（dev/code-review/close，未知阶段值按 fail-safe 强制）——提取落盘小节并核对五要素关键词
+    record = _extract_clearance_request_record(content, risk_level)
+    if record is None:
+        return False, (
+            "🛑 任务已进入 dev 及之后阶段，但 TASK 文档缺失放行请求落盘小节"
+            f"「{_CLEARANCE_REQUEST_HEADING}」（L2 应写入 2.x 节、L1 应写入 1.5 后固定小节同名）。"
+            "请按 planner.md 第 8 节将放行请求五要素原文落盘 TASK 文档，不依赖 ask 弹窗；"
+            "代理不得代填放行记录。"
+        )
+    missing = [name for name, pattern in _CLEARANCE_REQUEST_KEYWORDS.items()
+               if not re.search(pattern, record)]
+    if missing:
+        return False, (
+            "🛑 任务已进入 dev 及之后阶段，但放行请求落盘小节"
+            f"「{_CLEARANCE_REQUEST_HEADING}」缺少五要素关键词：{('、'.join(missing))}。"
+            "请补齐（目标概览/可写清单/自决清单/风险概览/盲审结论）后重新落盘。"
+        )
+    return True, (
+        f"放行请求落盘校验通过（{risk_level} 任务，{current_stage} 阶段，"
+        f"「{_CLEARANCE_REQUEST_HEADING}」小节五要素齐全）"
+    )
+
+
 def check_unit_tests(tests_dir=None, timeout=600):
     """16. 单元测试执行: 以子进程真实执行 linter 同级 tests 目录的单测套件
 
@@ -1636,6 +1741,7 @@ def main():
             (lambda: check_model_metadata(task_file), "14. 模型元数据校验"),
             (lambda: check_execution_channel_records(task_file), "15. 执行通道记录校验"),
             (lambda: check_plan_clearance(task_file), "18. 计划放行校验"),
+            (lambda: check_clearance_request_record(task_file), "19. 放行请求落盘校验"),
         ]
 
         for func, name in checkers:
@@ -1647,7 +1753,7 @@ def main():
             print()
 
     # ======================================================================
-    # 场景 B: 一键全量校验 (一键运行全部 17 个检查器)
+    # 场景 B: 一键全量校验 (一键运行全部 19 个检查器)
     # ======================================================================
     if args.all or not args.check_task:
         # 如果 check_task 已运行，需要一个新的收集器用于全量（或合并）
@@ -1717,6 +1823,8 @@ def main():
                 # 标签 [17/17] 显式映射 SAGE-18（SAGE-17 为提交信息单项检查器保留段，T-014）；
                 # 输出序号 [17/17] 先于 [16/17] 单元测试出现（task_checkers 块在单测之前执行）属注册序错位，CODE_WIKI 有备案
                 (lambda: check_plan_clearance(task_file), "[17/17] 计划放行校验", "SAGE-18"),
+                # 标签 [19/19] 显式映射 SAGE-19（T-024：放行请求五要素原文必须落盘 TASK 文档，弹窗瞬逝后可追溯）
+                (lambda: check_clearance_request_record(task_file), "[19/19] 放行请求落盘校验", "SAGE-19"),
             ]
             for func, name, rule_id in task_checkers:
                 ok, msg = func()

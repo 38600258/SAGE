@@ -710,6 +710,128 @@ class CheckPlanClearanceTests(unittest.TestCase):
         self.assertIn("跳过", msg)
 
 
+class CheckClearanceRequestRecordTests(unittest.TestCase):
+    """check_clearance_request_record 判定矩阵（T-024）：到期落盘强制 / 五要素缺失阻断 /
+    早期未到期跳过 / L0·L3 豁免 / 落盘位置（L2 2.x、L1 1.5 后同名小节）。"""
+
+    CLEARANCE_FIVE_ELEMENTS = (
+        "目标与验收概览：修复 dev/close 主代理越权代行。\n"
+        "可写清单：orchestrator.md、planner.md（范围增量：CODE_WIKI.md）。\n"
+        "自决清单：L2 落 2.x、L1 落 1.5 后小节（自决）。\n"
+        "风险概览：降级链不阻断、SAGE-19 误阻断。\n"
+        "盲审结论：WARN 无阻塞，6 条建议落实。\n"
+    )
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.linter = load_linter()
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+        sys.modules.pop("sage_linter_under_test", None)
+
+    def write_task(self, risk: str | None, phase: str, record_section: str | None) -> Path:
+        """构造最小 TASK 文档；risk 传 None 表示缺失风险等级；record_section 传 None 表示缺落盘小节。"""
+        lines = ["# TASK\n\n", "- **任务编号 (ID)**: T-TEST\n"]
+        if risk is not None:
+            lines.append(f"- **风险等级**: {risk}\n")
+        lines.append(f"- **当前阶段**: {phase}\n")
+        lines.append("- **计划放行**: 已放行（用户确认，2026-09-02T15:40:00+08:00）\n")
+        lines.append("- **项目根目录**: test\n- **功能分支**: feat/t-test\n")
+        if record_section is not None:
+            lines.append(f"\n{record_section}")
+        task = Path(self.temp_dir.name) / "ACTIVE_TASK_T-TEST.md"
+        task.write_text("".join(lines), encoding="utf-8")
+        return task
+
+    def test_l2_dev_record_complete_passes(self) -> None:
+        """L2 dev：2.x 固定小节「计划放行请求」五要素齐全 → 通过。"""
+        record = "### 2.2 计划放行请求\n\n" + self.CLEARANCE_FIVE_ELEMENTS
+        task = self.write_task("L2", "dev", record)
+        ok, msg = self.linter.check_clearance_request_record(task)
+        self.assertTrue(ok, msg)
+        self.assertIn("放行请求落盘校验通过", msg)
+
+    def test_l2_dev_missing_keywords_blocks(self) -> None:
+        """L2 dev：小节存在但缺五要素关键词（仅含「目标」）→ 阻断并披露缺失项。"""
+        record = "### 2.2 计划放行请求\n\n目标与验收概览：仅写目标，其余未落盘。\n"
+        task = self.write_task("L2", "dev", record)
+        ok, msg = self.linter.check_clearance_request_record(task)
+        self.assertFalse(ok)
+        self.assertIn("缺少五要素关键词", msg)
+        self.assertIn("可写清单", msg)
+
+    def test_l2_missing_section_blocks(self) -> None:
+        """L2 dev：完全缺失「计划放行请求」小节 → 阻断（fail-safe）。"""
+        task = self.write_task("L2", "dev", None)
+        ok, msg = self.linter.check_clearance_request_record(task)
+        self.assertFalse(ok)
+        self.assertIn("缺失放行请求落盘小节", msg)
+
+    def test_early_stages_skip(self) -> None:
+        """init / plan-review 未到期：放行请求时点尚未发生，跳过。"""
+        for stage in ("init", "plan-review"):
+            with self.subTest(stage=stage):
+                task = self.write_task("L2", stage, None)
+                ok, msg = self.linter.check_clearance_request_record(task)
+                self.assertTrue(ok)
+                self.assertIn("跳过", msg)
+
+    def test_l0_and_l3_exempt(self) -> None:
+        """L0 不适用 / L3 每阶段人工确认覆盖 → 跳过。"""
+        for risk in ("L0", "L3"):
+            with self.subTest(risk=risk):
+                task = self.write_task(risk, "dev", None)
+                ok, msg = self.linter.check_clearance_request_record(task)
+                self.assertTrue(ok)
+                self.assertIn("跳过", msg)
+
+    def test_l1_record_after_15_passes(self) -> None:
+        """L1 dev：1.5 后固定小节「计划放行请求」（如 1.6）五要素齐全 → 通过。"""
+        record = "### 1.6 计划放行请求\n\n" + self.CLEARANCE_FIVE_ELEMENTS
+        task = self.write_task("L1", "dev", record)
+        ok, msg = self.linter.check_clearance_request_record(task)
+        self.assertTrue(ok, msg)
+        self.assertIn("放行请求落盘校验通过", msg)
+
+    def test_missing_risk_failsafe_enforces(self) -> None:
+        """风险等级缺失 → 按 L2 fail-safe 强制，dev 阶段缺失落盘小节阻断。"""
+        task = self.write_task(None, "dev", None)
+        ok, msg = self.linter.check_clearance_request_record(task)
+        self.assertFalse(ok)
+        self.assertIn("缺失放行请求落盘小节", msg)
+
+    def test_later_stages_also_enforce(self) -> None:
+        """code-review / close 与 dev 同属到期阶段：五要素齐全通过、缺小节阻断（补测 T-024 建议 4）。"""
+        record = "### 2.2 计划放行请求\n\n" + self.CLEARANCE_FIVE_ELEMENTS
+        for stage in ("code-review", "close"):
+            with self.subTest(stage=stage):
+                task = self.write_task("L2", stage, record)
+                ok, msg = self.linter.check_clearance_request_record(task)
+                self.assertTrue(ok, msg)
+        for stage in ("code-review", "close"):
+            with self.subTest(stage=stage):
+                task = self.write_task("L2", stage, None)
+                ok, msg = self.linter.check_clearance_request_record(task)
+                self.assertFalse(ok)
+                self.assertIn("缺失放行请求落盘小节", msg)
+
+    def test_unknown_stage_failsafe_enforces(self) -> None:
+        """未知阶段值 → fail-safe 强制：缺失落盘小节阻断（补测 T-024 建议 4）。"""
+        task = self.write_task("L2", "unknown-stage", None)
+        ok, msg = self.linter.check_clearance_request_record(task)
+        self.assertFalse(ok)
+        self.assertIn("缺失放行请求落盘小节", msg)
+
+    def test_l1_record_before_16_rejected(self) -> None:
+        """L1 落盘位置必须为 1.5 后（1.6+）：1.3 等 1.5 前小节不算落盘（T-024 建议 2 正则对齐）。"""
+        record = "### 1.3 计划放行请求\n\n" + self.CLEARANCE_FIVE_ELEMENTS
+        task = self.write_task("L1", "dev", record)
+        ok, msg = self.linter.check_clearance_request_record(task)
+        self.assertFalse(ok)
+        self.assertIn("缺失放行请求落盘小节", msg)
+
+
 class CheckChangelogUpdateStageTests(unittest.TestCase):
     """check_changelog_update 阶段感知三态（T-021）：早期阶段跳过 / close 强制 / fail-safe 维持强制。
 
