@@ -16,3 +16,6 @@ Thumbs.db
 
 # SAGE provision 产物：运行时生成，不入版本库（T-025 遗留债，T-024 一次性修复）
 .omp/
+
+# 第三方文章本地转写：版权内容不随仓库分发（本地保留作参考，README 已改为链接引用）
+docs/references/codex-engineering/

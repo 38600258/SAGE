@@ -4,6 +4,8 @@
 
 SAGE 是一套面向 AI 智能体驱动研发的完整方法论框架与治理工具链。它提供了从项目启动到生产部署的全生命周期管理规范，以及配套的角色提示词、任务模板、跨工具 skill 默认发行版和自动化检查器。
 
+> **English** — SAGE is a governance toolkit for agent-first development: it turns "how agents should work" from soft prompt conventions into hard, machine-enforced quality gates — 19 automated checks (scope lock, evidence chain, blind review, plan clearance), a cross-host dispatch runtime (Codex / Claude Code / OMP / any CLI), stage-based model routing, and an L0–L3 adaptive workflow so the process never outweighs the task. MIT licensed.
+
 
 ## 1.0 定位
 
@@ -40,17 +42,32 @@ SAGE 1.0 将工作流封装为 `skills/sage-workflow/`：
 
 ## 快速开始
 
-1. 阅读 [AGENTS.md](AGENTS.md) — 智能体入口与快速导航
-2. 阅读核心方法论：
-   - [智能体优先的自主编程方法论](skills/sage-workflow/core/methodology/智能体优先的自主编程方法论.md)
-   - [智能体优先的自主项目管理方法论](skills/sage-workflow/core/methodology/智能体优先的自主项目管理方法论.md)
-3. 运行基线检查：
-   ```bash
-   uv run python skills/sage-workflow/core/scripts/sage_linter.py --all
-   uv run python skills/sage-workflow/core/scripts/dispatch_phase.py capabilities --adapter codex
-   ```
+**方式一：把 SAGE 装进你的项目**（推荐，约 1 分钟）
+
+```bash
+git clone https://github.com/38600258/SAGE.git
+# 先预览将复制哪些文件（不写盘）：
+uv run python SAGE/skills/sage-workflow/core/scripts/bootstrap_sage.py --repo-root <你的项目绝对路径> --dry-run
+# 确认后执行：
+uv run python SAGE/skills/sage-workflow/core/scripts/bootstrap_sage.py --repo-root <你的项目绝对路径>
+```
+
+bootstrap 会把角色契约（`prompts/`）、任务模板（`templates/`）、开发规范（`docs/guides/`）、质量门禁（`scripts/sage_linter.py`）、跨宿主派发协议与提交钩子（`.githooks/`）落盘到你的仓库——之后完全脱离 SAGE 源目录运行，已有本地规则不会被静默覆盖。
+
+**方式二：在 SAGE 源仓库直接体验**
+
+```bash
+uv run python skills/sage-workflow/core/scripts/sage_linter.py --all
+uv run python skills/sage-workflow/core/scripts/dispatch_phase.py capabilities --adapter codex
+```
 
 > 命令执行口径：默认推荐 `uv run python`（uv 自动优先使用项目虚拟环境）；无 uv 环境时，优先运行项目虚拟环境中的 python（例如 `.venv`），没有项目虚拟环境再使用系统 python。SAGE 全部命令示例均按此口径执行。
+
+**深入阅读**
+
+1. [AGENTS.md](AGENTS.md) — 智能体入口与快速导航
+2. [智能体优先的自主编程方法论](skills/sage-workflow/core/methodology/智能体优先的自主编程方法论.md)
+3. [智能体优先的自主项目管理方法论](skills/sage-workflow/core/methodology/智能体优先的自主项目管理方法论.md)
 
 ## 目录结构
 
@@ -89,6 +106,12 @@ SAGE 不强制所有项目走完整流程——它是工具箱，不是流水线
 ## 工具无关
 
 SAGE 不绑定任何特定的 AI 编程工具。它可以与 Antigravity、Cursor、Windsurf、Codex、Claude Code、Copilot Agent 等任何智能体环境配合使用。
+
+## 灵感来源
+
+SAGE 的方法论与工具链——任务分级、证据链、双向盲审、计划放行门、跨宿主派发与回执验证——形成于作者在真实 AI 项目交付中的工程实践与持续复盘，并融入了作者自己对 AI 编程协作方式的思考。
+
+「人类掌舵，智能体执行」（Humans steer. Agents execute.）一句取自 OpenAI 工程文章 [Harness engineering: leveraging Codex in an agent-first world](https://openai.com/index/harness-engineering/)（Ryan Lopopolo）——该文“设计环境、明确意图、构建反馈回路”的工程观与 SAGE 的实践方向一致。
 
 ## 许可证
 

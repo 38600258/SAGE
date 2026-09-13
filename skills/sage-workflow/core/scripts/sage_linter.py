@@ -61,6 +61,12 @@ _META_EXACT = {
     ".gitignore", ".env", ".editorconfig",
 }
 
+# 文档扫描排除项（T2 体积 / 新鲜度 / 交叉引用三检查器共享）：
+# 基础标记 + 各检查器按需追加；只读第三方参考目录以跨项目通用后缀识别
+# （-ref / -reference / -vendor），禁止写入具体项目名，避免工具链与业务仓库耦合
+_SCAN_EXCLUDE_MARKERS = ("node_modules",)
+_SCAN_EXCLUDE_SUFFIXES = ("-ref", "-reference", "-vendor")
+
 # 是否从 hooks 调用（环境变量 ANTIGRAVITY_HOOK=1 时自动精简输出）
 _IS_HOOK = os.environ.get("ANTIGRAVITY_HOOK") == "1"
 
@@ -76,6 +82,18 @@ def _is_meta_file(filepath):
     if fp.endswith(".md") and "/" not in fp:
         return True
     return False
+
+
+def _is_scan_excluded(fp_posix, extra_markers=()):
+    """判断路径是否排除在文档扫描之外（依赖 / 归档 / 只读第三方参考目录）。
+
+    只读参考目录按目录名后缀（-ref / -reference / -vendor）识别，
+    不写具体项目名——业务仓库代号不得硬编码进通用工具链。
+    """
+    for marker in tuple(_SCAN_EXCLUDE_MARKERS) + tuple(extra_markers):
+        if marker in fp_posix:
+            return True
+    return any(part.endswith(_SCAN_EXCLUDE_SUFFIXES) for part in fp_posix.split("/"))
 
 
 # ==============================================================================
@@ -620,7 +638,7 @@ def check_t2_document_lines(docs_dir):
     for md_file in docs_path.glob("**/guides/**/*.md"):
         # 排除只读/第三方参考目录
         fp_posix = md_file.as_posix()
-        if "cj-claw-ref" in fp_posix or "node_modules" in fp_posix:
+        if _is_scan_excluded(fp_posix):
             continue
         lines = get_file_lines(md_file)
         if len(lines) > 500:
@@ -647,7 +665,7 @@ def check_document_freshness(docs_dir, stale_days=30):
     for md_file in docs_path.glob("**/*.md"):
         # 排除已归档的任务和第三方参考目录
         fp_posix = md_file.as_posix()
-        if "architecture/tasks" in fp_posix or "archive" in fp_posix or "cj-claw-ref" in fp_posix or "node_modules" in fp_posix:
+        if _is_scan_excluded(fp_posix, extra_markers=("architecture/tasks", "archive")):
             continue
 
         # 优先使用 git log 获取最后修改时间
@@ -913,7 +931,7 @@ def check_cross_links(scan_dir):
     for md_file in scan_path.glob("**/*.md"):
         # 忽略归档、只读参考及依赖目录
         fp_posix = md_file.as_posix()
-        if "archive" in fp_posix or "cj-claw-ref" in fp_posix or "node_modules" in fp_posix or "references" in fp_posix:
+        if _is_scan_excluded(fp_posix, extra_markers=("archive", "references")):
             continue
 
         content = "".join(get_file_lines(md_file))
