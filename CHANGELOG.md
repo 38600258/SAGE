@@ -6,8 +6,8 @@
 
 ## [1.8.6] 🛠️ Fix 开源准备：门禁扫描排除项去业务化、第三方版权内容移出版本库、README 开源化 (L0) - 2026-09-14 04:40:00
 - 动机：仓库准备由私有转公开。转公开前审查发现三类问题：①`sage_linter.py` 三个检查器（T2 文档体积 / 文档新鲜度 / 交叉引用验证）各自硬编码具体业务仓库的参考目录名——业务代号写进通用工具链，与"工具链与业务仓库解耦"的公开主张自相矛盾，且随开源暴露项目代号；②`docs/references/codex-engineering/` 收录了 OpenAI 工程文章《Harness engineering: leveraging Codex in an agent-first world》的中文全文转写与 7 张原图——受版权保护内容随仓库分发有合规风险；③README 缺英文简介与"装进你的项目"的最短路径，新访客 1 分钟内无法上手。
-- 修复内容：①新增模块级共享常量 `_SCAN_EXCLUDE_MARKERS`（基础标记 node_modules）与 `_SCAN_EXCLUDE_SUFFIXES`（-ref / -reference / -vendor 跨项目通用后缀）及辅助函数 `_is_scan_excluded(fp_posix, extra_markers=())`——只读第三方参考目录按目录名后缀识别，禁止写入具体项目名；三处调用点等价替换（T2：`_is_scan_excluded(fp_posix)`；新鲜度：`extra_markers=("architecture/tasks", "archive")`；交叉引用：`extra_markers=("archive", "references")`），原硬编码目录名由 `-ref` 后缀规则命中，行为等价。②方法论文档单页章程示例中的具体项目名改为通用示例（"示例：支付网关重构"）。③`docs/references/codex-engineering/` 经 `git rm -r --cached` 移出版本库（本地文件保留作参考），`.gitignore` 追加该路径防再次入库；git 历史不重写——CHANGELOG 与任务文档中的历史 commit 引用（4fac1b7 / 7589a91 / 3b601d8 / 3cde17a 等）保持有效，证据链可追溯优先。④README：顶部新增英文简介（定位一句话：把智能体工作方式从 Prompt 软约定变成机器强制门禁）；「快速开始」重写为方式一 bootstrap 装进你的项目（含 `--dry-run` 预览与"已有本地规则不静默覆盖"说明）＋方式二源仓库体验＋深入阅读三层结构；新增「灵感来源」节链接引用原文（openai.com/index/harness-engineering，Ryan Lopopolo）——"人类掌舵，智能体执行"口号出处由此可溯。
-- 验证：全量单测 111 例 OK 零回归；`sage_linter.py --all` 通过；全仓 grep 业务代号（cj-claw / cj-saas 及大小写变体）零命中（归档任务文档中的历史记录除外，属只增不改的证据链）。
+- 修复内容：①新增模块级共享常量 `_SCAN_EXCLUDE_MARKERS`（基础标记 node_modules）与 `_SCAN_EXCLUDE_SUFFIXES`（-ref / -reference / -vendor 跨项目通用后缀）及辅助函数 `_is_scan_excluded(fp_posix, extra_markers=())`——只读第三方参考目录按目录名后缀识别，禁止写入具体项目名；三处调用点等价替换（T2：`_is_scan_excluded(fp_posix)`；新鲜度：`extra_markers=("architecture/tasks", "archive")`；交叉引用：`extra_markers=("archive", "references")`），原硬编码目录名由 `-ref` 后缀规则命中，行为等价。②方法论文档单页章程示例中的具体项目名改为通用示例（"示例：支付网关重构"）。③`docs/references/codex-engineering/` 移出版本库（本地文件保留作参考），`.gitignore` 追加该路径防再次入库。④README：顶部新增英文简介（定位一句话：把智能体工作方式从 Prompt 软约定变成机器强制门禁）；「快速开始」重写为方式一 bootstrap 装进你的项目（含 `--dry-run` 预览与"已有本地规则不静默覆盖"说明）＋方式二源仓库体验＋深入阅读三层结构；新增「灵感来源」节链接引用原文（openai.com/index/harness-engineering，Ryan Lopopolo）——"人类掌舵，智能体执行"口号出处由此可溯。
+- 验证：全量单测 111 例 OK 零回归；`sage_linter.py --all` 通过；全仓 grep 业务代号（cj-claw / cj-saas 及大小写变体）零命中。
 - 说明：本变更按 L0 轻量方式落地（开源前一次性清理，未创建 TASK 文档）；变更发起与执行由人类授权。
 
 ## [1.8.5] ✨ Feature 修复 L2 dev/close 主代理越权代行 + 放行门 turn 级强制停止 (T-024) - 2026-09-02 19:30:00
@@ -48,7 +48,7 @@
 
 
 ## [1.7.0] ✨ Feature 吸收 该真实项目反哺四项改进：命令口径声明、bootstrap 补复制 references、adapter 踩坑沉淀位、主入口现场复核规则 (T-019) - 2026-08-31 03:40:18
-- 缺陷暴露（动机）：该真实项目仓库执行「同步 SAGE 工作流 1.5.2」任务（T-119）时产出四项已在其项目实证有效、且上游缺失的实践反哺（工作区输入 `外部反馈记录`，核实基线 v1.5.2 @ `3b601d8`）；对照 v1.6.0 逐项复核四项全部仍然成立。①入口文档全部命令示例假设宿主装有 `uv`，该真实项目型环境（Windows、有 .venv 与系统 python、无全局 uv）下入口给出的命令不可直接执行——脚本层 `.githooks/commit-msg` 探测链已解决，文档层没有；②SKILL.md「内置核心」列出 `references/dispatch-protocol.md` 与 `path-registry.md`，但 `bootstrap_sage.py` 的 `build_plan` 复制清单不含 references/，bootstrap 项目装上派发可执行层（sage_dispatch.py + adapters）却没有协议全文；③四个 adapter md 均无宿主特定陷阱沉淀位，该真实项目已验证的三条实战结论无处跨项目复用；④「失败恢复前现场复核」仅存在于 override 规则 5 / execution-channels / TASK-TEMPLATE X.0 且都绑定 fallback 场景，主入口 AGENTS.md 任务入口规则 1~7 无此条——盲目重试多发生在尚未决定 fallback 的阶段。
+- 缺陷暴露（动机）：该真实项目仓库执行「同步 SAGE 工作流 1.5.2」任务（T-119）时产出四项已在其项目实证有效、且上游缺失的实践反哺（工作区输入 `外部反馈记录`，核实基线 v1.5.2 @ `9bcf176`）；对照 v1.6.0 逐项复核四项全部仍然成立。①入口文档全部命令示例假设宿主装有 `uv`，该真实项目型环境（Windows、有 .venv 与系统 python、无全局 uv）下入口给出的命令不可直接执行——脚本层 `.githooks/commit-msg` 探测链已解决，文档层没有；②SKILL.md「内置核心」列出 `references/dispatch-protocol.md` 与 `path-registry.md`，但 `bootstrap_sage.py` 的 `build_plan` 复制清单不含 references/，bootstrap 项目装上派发可执行层（sage_dispatch.py + adapters）却没有协议全文；③四个 adapter md 均无宿主特定陷阱沉淀位，该真实项目已验证的三条实战结论无处跨项目复用；④「失败恢复前现场复核」仅存在于 override 规则 5 / execution-channels / TASK-TEMPLATE X.0 且都绑定 fallback 场景，主入口 AGENTS.md 任务入口规则 1~7 无此条——盲目重试多发生在尚未决定 fallback 的阶段。
 - 四项落地：①命令口径**声明式**方案（用户裁决，计划放行轮三轮定稿）——既有 40 处 `uv run python` 命令示例零改动，仅在 SKILL.md 常用命令块后与 README 快速开始各加一行声明，明确三层执行优先级：默认 `uv run python`（uv 自动优先项目虚拟环境）→ 无 uv 时优先项目虚拟环境中的 python（例如 `.venv`）→ 再退系统 python，与 `.githooks` 探测链同构；Main Agent 首轮误读为「改写命令为 python」，被用户在计划放行门纠正，误读与纠正过程在 TASK 1.2 决策 3 如实存证。②`build_plan` 追加 references 整目录复制（`SKILL_ROOT/references/` → `<repo>/docs/guides/references/`，`is_dir()` 守卫 + `_is_build_artifact` 过滤与既有循环口径一致；references/*.md 零相对链接无需 transform，T-019 实测）；SKILL.md Bootstrap 规则清单补落点行，保持「内置核心 = 可分发资产」口径一致。③四份 `adapters/<id>/<id>.md` 统一增设「已知踩坑」节（官方沉淀位，新踩坑随任务收尾沉淀，纳入内容卫生范围）：claude-code 吸收 `--add-dir` 可变参数吞 prompt（prompt 须放参数序列最前或经 stdin）；cli 吸收 Qwen 用户级 `~/.qwen/skills/using-superpowers` 残留、Qwen Windows `'printf' is not recognized` stderr 噪声（成功判定回到「TASK/Git 产出为准」，不得仅因附带 stderr 判失败）；codex/generic-tool 置「暂无记录」。④根/entry `AGENTS.md` 任务入口规则追加第 8 条「失败恢复前现场复核」（该真实项目原表述：复核 Git/TASK/进程/已有产出，禁止未复核盲目重试或切换通道），根/entry `AGENTS.override.md` 规则 5 与 `execution-channels.md` 核心原则及 fallback 条款泛化为「任何重试、修复或切换通道之前必须先完成现场复核」，降级链「人类明确处理或授权后」语义原样保留。
 - 验证：临时空目录真实 bootstrap 实证复制 46 文件、references 两文件与源 diff 零差异（T-015 先例）；AC-1~4 全部 grep/diff 可证伪验证通过并由代码盲审独立重跑确认；双盲审均 WARN 零阻塞（计划盲审四条建议两条采纳两条被用户裁决取代，代码盲审四条建议三条收尾吸收一条登记后续任务）。返工 1 次（init 期覆写丢失模板骨架被 SAGE-01/02 拦截）；收尾修正 sed 全局替换误伤 2.1/4.1 冻结盲审文本的操作（已恢复原文，教训记 5.2）。技术债：`build_plan` 复制清单无持久化单测（AC-2 实证替代，5.1 登记）；path-registry.md 派发协议行未反映 references 新落点（登记后续任务）；SKILL.md 达 100 行零余量，后续增补必须先拆分。
 
@@ -96,7 +96,7 @@
 - 硬约束沉淀：`test_sage_linter.py` 是 TD-6 唯一透传资产，严禁注入任何 `bootstrap_sage`/repository 级依赖（污染将导致 bootstrap 项目 check_unit_tests 恒阻断）；build_plan 用例必须放独立文件承载。
 
 ## [1.3.0] ✨ Feature 质量门禁新增单测执行项与流程规范沉淀 (T-012) - 2026-08-19 08:27:25
-- TD-3 落地（T-011 复盘最优先项）：sage_linter.py 新增第 16 个检查器 `check_unit_tests`，`--all` 从纯静态扫描升级为「静态扫描 + 真实执行」双保险——以 `sys.executable -m unittest discover` 子进程执行 linter 同级 `tests/` 套件，测试失败或超时（默认 600 秒，可注入）即阻断退出码 2；tests 目录缺失或无 `test_*.py` 时跳过提示（bootstrap 项目合法布局，非阻断）。tests_dir/timeout 可注入参数化，配套三态 + 超时共 5 例单测（31/31 全绿），关闭 4fac1b7 式断言失配潜伏主干的门禁盲区。代码盲审独立复核：必败探针实证 [16/16] 阻断退出码 2、31/31 复跑、/16 口径 grep 零残留。
+- TD-3 落地（T-011 复盘最优先项）：sage_linter.py 新增第 16 个检查器 `check_unit_tests`，`--all` 从纯静态扫描升级为「静态扫描 + 真实执行」双保险——以 `sys.executable -m unittest discover` 子进程执行 linter 同级 `tests/` 套件，测试失败或超时（默认 600 秒，可注入）即阻断退出码 2；tests 目录缺失或无 `test_*.py` 时跳过提示（bootstrap 项目合法布局，非阻断）。tests_dir/timeout 可注入参数化，配套三态 + 超时共 5 例单测（31/31 全绿），关闭 1a18cbe 式断言失配潜伏主干的门禁盲区。代码盲审独立复核：必败探针实证 [16/16] 阻断退出码 2、31/31 复跑、/16 口径 grep 零残留。
 - 编号口径全量同步 `/15` → `/16`：sage_linter.py 内 15 处 `[X/15]` 输出标签与 docstring/注释 3 处"15 个检查器"表述、CODE_WIKI.md 3 处数量表述与 4.1 检查器清单（补第 16 项）；1-15 顺序与 `--check-task`（场景 A）行为不变，methodology 编号引用保持有效。
 - 流程规范沉淀（T-011 复盘问题 2/3/4）：TASK-TEMPLATE 效能数据"返工次数"行追加口径注释（盲审退回、门禁未过重跑、格式试错每轮计 1，含微返工，随模板物理复制传播）；task-document-standards 第二节新增"先例优先"与"改码前先登记"两条硬约束；KNOWN_PATTERNS 新增 BP-014（先例优先）/AP-006（静态门禁盲区）/AP-007（改码前登记）三条原子条目。
 - 已知限制（技术债，语义安全）：bootstrap 复制清单仅含 sage_linter.py 与 sage_dispatch.py、不含 `scripts/tests/`（dry-run 实证），bootstrap 后项目该检查器恒为跳过——后续任务评估是否将 tests/ 纳入复制清单。
@@ -105,7 +105,7 @@
 ## [1.2.0] ✨ Feature 适配器化子代理生成与 linter 阶段感知 (T-011) - 2026-08-19 06:39:16
 - 适配器化子代理生成（provision 下沉到各 IDE 适配器）：适配器目录从平铺 `adapters/*.json|md` 改为整目录 `adapters/<id>/`（cli/codex/generic-tool 迁移 + 新增 claude-code）；生成逻辑（`build_toml_agent`/`build_markdown_agent`/`ROLE_INSTRUCTIONS`）逐字迁入各自 `provision.py`，双入口可用（独立 argparse + `dispatch_phase.py provision --adapter <id>` 委托，项目本地优先、退出码透传）；主入口删除 `--method`/`PROVISIONING_METHODS`/`provision_agents`，新增 `--adapter` 必填，`--model-provider` 保留主入口并仅对 codex 委托透传（非 codex 拒绝退出码 2）；`profile_candidates` 两侧路径联动改子目录结构；bootstrap 复制计划改整目录（含 provision.py）。
 - 修复 sage_linter.py `check_evidence_complete` 阶段感知缺陷：按 TASK 元数据 `当前阶段` 判定，仅 code-review/close 强制校验 3.2 证据链，init/plan-review/dev 期跳过并提示；元数据缺失或未知阶段维持强制（fail-safe）。此前 init 期对模板默认未勾选的证据链误报阻断，提前勾选反而属于伪造证据。
-- 顺带修复 HEAD 提交 4fac1b7（codex.json 模型切至 GPT-5.6 系列）未同步的 4 处测试断言失配（test_prepare_native_subagent_envelope_and_verify_real_output 与 provision TOML 用例在 HEAD 上本就失败）；同步新增 linter 阶段感知三态单测（test_sage_linter.py，26/26 全绿）。
+- 顺带修复 HEAD 提交 1a18cbe（codex.json 模型切至 GPT-5.6 系列）未同步的 4 处测试断言失配（test_prepare_native_subagent_envelope_and_verify_real_output 与 provision TOML 用例在 HEAD 上本就失败）；同步新增 linter 阶段感知三态单测（test_sage_linter.py，26/26 全绿）。
 - 六处文档同步新结构：path-registry.md / dispatch-protocol.md / SKILL.md / execution-channels.md 5.6 / CODE_WIKI.md（含超出 1.4 声明行号的目录结构联动，盲审已核验必要性）/ KNOWN_PATTERNS.md BP-013；provision 委托示例补 `--repo-root`（委托化后 bootstrap 项目内必需，缺省会脚本定位失败，TD-1）。
 - 遗留技术债：TD-2（locate_provision_script 报错语义区分）、TD-3（质量门禁不运行单测的系统性盲区）、TD-4（bootstrap rglob 未过滤 `__pycache__`）——详见归档任务 5.1。
 
@@ -114,7 +114,7 @@
 - 校验项数量对齐：sage_linter.py 输出编号统一为 [X/15]，docstring 与方法论数量表述同步为 15 项。
 - 模式库清理：删除 8 条演示 SaaS 项目残留条目（BP-001~003、AP-001~003、DP-001~002），加删除说明。
 - CHANGELOG 回溯补正：为 0.1.0/0.2.0 演示条目和 1.0.0 时间戳归属追加补正标注。
-- core/VERSION baseline_commit 更新至 7589a91（T-008 最终提交）。
+- core/VERSION baseline_commit 更新至 3f46dc3（T-008 最终提交）。
 - README 新增"适用场景与流程重量"节，明确目标用户画像。
 
 ## [1.1.0] ✨ Feature 注入式子代理通道与 doctor/provision 通道治理 (T-009) - 2026-08-16 21:40:00
@@ -138,7 +138,7 @@
 - 更新 SAGE 入口、执行通道和方法论文档，将旧的“skill 只能引用不复制”口径升级为“skill 内置默认发行版 + 项目覆盖优先”。
 - 更新 README 与架构总览，明确 SAGE 1.0 的 workflow skill 产品形态和权威来源规则。
 - 统一 skill 新增文档语言口径，将 `SKILL.md`、`adapters/` 与 `references/` 说明改为中文，仅保留必要英文技术标识。
-- 同步 另一真实项目 `3cde17a` 的 SAGE 可证伪契约改造：TASK 模板引入 `AC-ID`、`[auto]/[manual]`、验证方式与证据位置，角色契约和 linter 增加验收映射校验。
+- 同步该真实项目的 SAGE 可证伪契约改造：TASK 模板引入 `AC-ID`、`[auto]/[manual]`、验证方式与证据位置，角色契约和 linter 增加验收映射校验。
 - 清理旧 SaaS 示例任务归档与看板示例数据，统一任务归档路径到 `docs/project/tasks/`。
 - 补齐 standalone/bootstrap 所需的 CHANGELOG/Git 规范、`sage_linter.py` 和 `.githooks/` 默认发行版资产，并修正默认入口回退与活跃 TASK 路径。
 - 删除根目录与 `skills/sage-workflow/core/` 重复的 prompts、templates、guides、方法论、linter 和 hooks，SAGE 源仓库统一从 skill core 读取默认工作流。

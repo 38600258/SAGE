@@ -1,5 +1,5 @@
-version: 1.8.5
-baseline_commit: 1816204
-release_date: 2026-09-02
+version: 1.8.6
+baseline_commit: c2ec89f
+release_date: 2026-09-14
 source: sage
 mode: default-distribution
