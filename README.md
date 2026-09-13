@@ -82,7 +82,7 @@ uv run python skills/sage-workflow/core/scripts/dispatch_phase.py capabilities -
 | `skills/sage-workflow/core/githooks/` | 提交信息硬门禁默认发行版 |
 | `skills/sage-workflow/core/guides/` | 开发、任务、CHANGELOG、Git、执行通道和设计规范 |
 | `skills/sage-workflow/adapters/*.json` | 原生 subagent/CLI 能力、阶段 agent 映射与模型路由 |
-| `docs/project/` | 看板、模式库、决策日志 |
+| `skills/sage-workflow/core/scaffold/` | 项目治理初始骨架（看板 / 模式库 / 决策日志 / 交接指南模板） |
 
 ## 适用场景与流程重量
 

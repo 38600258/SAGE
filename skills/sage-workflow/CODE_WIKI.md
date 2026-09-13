@@ -70,8 +70,7 @@
 | `ARCHITECTURE.md` | 文档 | 顶层架构地图 |
 | `CHANGELOG.md` | 文档 | 只增不改的变更日志（Keep a Changelog） |
 | `README.md` | 文档 | 产品定位与快速开始 |
-| `docs/project/` | 状态 | 看板、模式库、决策日志、交接指南、归档任务 |
-| `docs/references/` | 参考 | 外部参考文章与 API 模板 |
+| `skills/sage-workflow/core/scaffold/` | 状态骨架 | 看板、模式库、决策日志、交接指南模板，bootstrap 时落盘到目标项目 |
 | `skills/sage-workflow/SKILL.md` | 入口 | skill 触发、模式选择、启动流程、红线 |
 | `skills/sage-workflow/core/VERSION` | 元数据 | 发行版本 + 基线提交同步锚点 |
 | `skills/sage-workflow/core/entry/` | 规范 | 默认入口文件（AGENTS.md） |

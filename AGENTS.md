@@ -9,7 +9,7 @@
 - 开发/任务文档/变更日志/Git 规范 → [development-standards](skills/sage-workflow/core/guides/development-standards.md) / [task-document-standards](skills/sage-workflow/core/guides/task-document-standards.md) / [changelog-standards](skills/sage-workflow/core/guides/changelog-standards.md) / [git-standards](skills/sage-workflow/core/guides/git-standards.md)
 - 设计原则 / 模型选择 / 执行通道 → [core-beliefs](skills/sage-workflow/core/guides/core-beliefs.md) / [model-selection](skills/sage-workflow/core/guides/model-selection.md) / [execution-channels](skills/sage-workflow/core/guides/execution-channels.md)
 - 架构总览 → [ARCHITECTURE.md](ARCHITECTURE.md)；变更日志 → [CHANGELOG.md](CHANGELOG.md)
-- 看板 / 模式库 / 决策 / 交接 → [PROJECT_BOARD](docs/project/PROJECT_BOARD.md) / [KNOWN_PATTERNS](docs/project/KNOWN_PATTERNS.md) / [DECISION_LOG](docs/project/DECISION_LOG.md) / [HANDOVER](docs/project/HANDOVER-GUIDE.md)
+- 项目治理初始骨架（看板 / 模式库 / 决策 / 交接模板）→ [core/scaffold/docs/project/](skills/sage-workflow/core/scaffold/docs/project/)
 - 任务模板 → [TASK-TEMPLATE.md](skills/sage-workflow/core/templates/TASK-TEMPLATE.md)（L1 及以上必须物理复制模板）；ADR / PRD → [core/templates/](skills/sage-workflow/core/templates/)
 - 角色提示词 → [core/prompts/](skills/sage-workflow/core/prompts/)；质量门禁 → `uv run python skills/sage-workflow/core/scripts/sage_linter.py --all`
 

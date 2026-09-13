@@ -42,7 +42,7 @@ SAGE 是工具无关的智能体优先开发工作流。1.0 版本将流程、�
 | `skills/sage-workflow/core/prompts/` | 角色契约默认发行版 | orchestrator、planner、reviewer、coder、closer、doc-gardener |
 | `skills/sage-workflow/core/templates/` | 模板默认发行版 | TASK、ADR、PRD 物理复制模板 |
 | `skills/sage-workflow/core/guides/` | 规范默认发行版 | 开发、任务、CHANGELOG、Git、执行通道、模型选择和核心信念 |
-| `docs/project/` | 项目状态 | 看板、模式库、决策日志、交接指南、归档任务 |
+| `skills/sage-workflow/core/scaffold/` | 项目治理初始骨架 | 看板、模式库、决策日志、交接指南模板，bootstrap 时落盘到目标项目 |
 | `skills/sage-workflow/core/scripts/` | 工具默认发行版 | `sage_linter.py`、`bootstrap_sage.py`、`dispatch_phase.py` |
 | `skills/sage-workflow/core/githooks/` | 提交门禁默认发行版 | commit-msg 硬门禁及启用说明 |
 | `skills/sage-workflow/` | Skill 发行版 | SAGE 1.0 默认规范包与跨工具适配层 |
