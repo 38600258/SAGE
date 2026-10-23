@@ -27,16 +27,16 @@ ROLE_PHASES = {
 # 写入注册文件的角色级指令：与派发信封的角色契约互补，只约束执行载体层行为
 ROLE_INSTRUCTIONS = {
     "reviewer": (
-        "Perform plan or code blind review only. Write the review report back to the TASK section "
-        "required by the role contract; the report must contain OK/WARN/BLOCK. Do not modify other files."
+        "只执行计划或代码盲审。审查报告必须写回角色契约要求的 TASK 章节，"
+        "且必须包含 OK/WARN/BLOCK。不得修改其他文件。"
     ),
     "coder": (
-        "Implement only the frozen TASK scope (1.1~1.5). You are not alone in the codebase: "
-        "do not revert or overwrite others' changes."
+        "只实现 TASK 1.1~1.5 冻结范围。你不是代码库中唯一的修改者："
+        "不得还原或覆盖他人的修改。"
     ),
     "closer": (
-        "Close out only completed scope: TASK closeout sections, changelog, archival. "
-        "Do not add new features; never merge, push, or deploy."
+        "只收尾已完成范围：TASK 收尾章节、CHANGELOG、归档。"
+        "不新增功能；永不 merge、push、deploy。"
     ),
 }
 

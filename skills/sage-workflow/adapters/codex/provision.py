@@ -24,16 +24,16 @@ ROLE_PHASES = {
 # 写入注册文件的角色级指令：与派发信封的角色契约互补，只约束执行载体层行为
 ROLE_INSTRUCTIONS = {
     "reviewer": (
-        "Perform plan or code blind review only. Write the review report back to the TASK section "
-        "required by the role contract; the report must contain OK/WARN/BLOCK. Do not modify other files."
+        "只执行计划或代码盲审。审查报告必须写回角色契约要求的 TASK 章节，"
+        "且必须包含 OK/WARN/BLOCK。不得修改其他文件。"
     ),
     "coder": (
-        "Implement only the frozen TASK scope (1.1~1.5). You are not alone in the codebase: "
-        "do not revert or overwrite others' changes."
+        "只实现 TASK 1.1~1.5 冻结范围。你不是代码库中唯一的修改者："
+        "不得还原或覆盖他人的修改。"
     ),
     "closer": (
-        "Close out only completed scope: TASK closeout sections, changelog, archival. "
-        "Do not add new features; never merge, push, or deploy."
+        "只收尾已完成范围：TASK 收尾章节、CHANGELOG、归档。"
+        "不新增功能；永不 merge、push、deploy。"
     ),
 }
 
@@ -81,7 +81,13 @@ def build_toml_agent(role: str, models: dict[str, Any], provider: str) -> tuple[
     if not model_id:
         model_id = "REPLACE_WITH_MODEL_ID"
         warning = f"未解析到 {role} 默认模型；请替换 model 字段后再注册"
-    sandbox = "read-only" if role == "reviewer" else "workspace-write"
+    sandbox = "workspace-write"
+    sandbox_note = None
+    if role == "reviewer":
+        sandbox_note = (
+            "sandbox_mode=workspace-write：reviewer 必须能写回 TASK 2.x/4.x 审查章节；"
+            "写权限已由 developer_instructions 限定为仅 TASK 文档。"
+        )
     content = (
         f'name = "sage_{role}"\n'
         f'description = "SAGE {role} subagent for SAGE workflow phases: {", ".join(phases)}."\n'
@@ -91,13 +97,14 @@ def build_toml_agent(role: str, models: dict[str, Any], provider: str) -> tuple[
         f'sandbox_mode = "{sandbox}"\n'
         "\n"
         'developer_instructions = """\n'
-        f"You are the SAGE {role} subagent. Follow the repository's {role} role prompt when a ROLE_PROMPT path is provided.\n"
-        "Read REPO_ROOT, TASK_PATH, ROLE_PROMPT, and PHASE from the task prompt; TASK metadata is the source of scheduling truth.\n"
+        f"你是 SAGE {role} 子代理。提供了 ROLE_PROMPT 路径时，遵循仓库的 {role} 角色契约。\n"
+        "从派发 prompt 中读取 REPO_ROOT、TASK_PATH、ROLE_PROMPT、PHASE；TASK 元数据是调度事实的唯一来源。\n"
         f"{ROLE_INSTRUCTIONS[role]}\n"
-        "Reply in Chinese by default with evidence and changed files.\n"
+        + ("只允许写 TASK 文档（含 2.x/4.x 审查章节），不得改代码、改计划或触碰其他文件。\n" if role == "reviewer" else "")
+        + "默认用中文回复，附证据与变更文件清单。\n"
         '"""\n'
     )
-    return content, warning
+    return content, sandbox_note
 
 
 def provision(args: argparse.Namespace) -> dict[str, Any]:
@@ -111,13 +118,13 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     for role in roles:
         filename = f"sage_{role}.toml"
-        content, warning = build_toml_agent(role, models, provider)
+        content, sandbox_note = build_toml_agent(role, models, provider)
         target_path = target_dir / filename
         if target_path.exists() and not args.force:
             results.append({"role": role, "path": str(target_path), "status": "skipped", "note": "已存在；使用 --force 覆盖"})
             continue
         target_path.write_text(content, encoding="utf-8")
-        results.append({"role": role, "path": str(target_path), "status": "written", "note": warning})
+        results.append({"role": role, "path": str(target_path), "status": "written", "note": sandbox_note})
     post_steps = [
         "重启或刷新宿主以加载新的 agent 注册；注册是否生效以宿主实际派发结果为准。",
         "注册型模型变更必须同步 adapter JSON（models.<phase>），避免双源漂移。",

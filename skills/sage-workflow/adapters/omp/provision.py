@@ -54,7 +54,7 @@ USER_AGENT_DIR: Path = Path.home() / ".omp" / "agent"
 ROLE_AGENT_NAME: dict[str, str] = ROLE_MODEL_ROLE
 
 AGENT_TOOLS = {
-    "reviewer": "read, grep, glob, bash, web_search, lsp",
+    "reviewer": "read, write, edit, grep, glob, bash, web_search, lsp",
     "coder": "read, write, edit, grep, glob, bash",
     "closer": "read, write, edit, grep, glob, bash",
 }
@@ -71,6 +71,7 @@ ROLE_BODY = {
         "先定位到 REPO_ROOT，读取 ROLE_PROMPT 与 TASK_PATH，任务调度事实以 TASK 元数据为准；\n"
         "角色职责以 ROLE_PROMPT 指向的当前权威角色契约为唯一来源，本文件不复制角色规则。\n"
         "按 reviewer 角色契约执行计划/代码盲审，报告必须包含 OK/WARN/BLOCK，并写回 TASK 对应阶段章节；\n"
+        "只允许写 TASK 文档（含 2.x/4.x 审查章节），不得改代码、改计划或触碰其他文件；\n"
         "stdout、退出码或口头完成不能单独作为成功证据。"
     ),
     "coder": (
