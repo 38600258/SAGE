@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OMP（Oh My Pi）适配器角色路由配置生成器：生成 .omp/ 目录三件套。
+"""OMP（Oh My Pi）适配器角色路由配置生成器：生成 .omp/ 目录（config.yml + agents/sage_*.md）。
 
 OMP 的模型路由机制（以官方源码 docs/task-agent-discovery.md 为准）：
 - `task` 工具派发只设置 `agent`，不设置 worker model；模型由 agent frontmatter 的
@@ -9,16 +9,17 @@ OMP 的模型路由机制（以官方源码 docs/task-agent-discovery.md 为准�
   frontmatter `model: "@role"` 通过 `modelRoles.<role>` 解析到具体模型。
 - `modelRoles` 配置在 `~/.omp/agent/config.yml`（全局）或 `<cwd>/.omp/config.yml`（项目）。
 
-三角色架构：与 codex 适配器一致——`sage_reviewer` 覆盖 plan-review + code-review 两阶段，
-`sage_coder` 覆盖 dev，`sage_closer` 覆盖 close。用户可在 omp.json `models.<phase>.id`
-为每阶段配置实际模型标识符；审查两阶段共用 `sage_reviewer` 键，模型取 plan-review 的
-首个非空值，若 code-review 与 plan-review 不一致则告警（对齐 codex build_toml_agent 语义）。
+四阶段各自独立 agent + 独立 modelRoles 键：`sage_plan_reviewer`（plan-review）、`sage_coder`（dev）、
+`sage_code_reviewer`（code-review）、`sage_closer`（close）。用户可在 omp.json `models.<phase>.id`
+为每阶段配置实际模型标识符——两个审查阶段因此可以使用不同模型；想要同一模型时，在
+plan-review 与 code-review 两处填同一个 id 即可（脚本不做一致性约束，也不再取「首个非空」）。
 
 本脚本生成（bootstrap 布局下默认写入 <脚本所在项目根>/.omp；--user 写入 ~/.omp/agent 用户目录）：
-1. `config.yml` —— modelRoles 段（sage_reviewer/sage_coder/sage_closer + advisor 固定键）
-2. `agents/sage_reviewer.md` —— 审查（plan-review + code-review）用
+1. `config.yml` —— modelRoles 段（四个阶段键 + advisor 固定键）
+2. `agents/sage_plan_reviewer.md` —— plan-review 用
 3. `agents/sage_coder.md` —— dev 用
-4. `agents/sage_closer.md` —— close 用
+4. `agents/sage_code_reviewer.md` —— code-review 用
+5. `agents/sage_closer.md` —— close 用
 
 双入口设计：
 - 独立运行：`python adapters/omp/provision.py`（默认项目目录）或 `--user`（用户目录）
@@ -34,24 +35,26 @@ from typing import Any
 
 
 PROVISION_ROLES = ("reviewer", "coder", "closer")
-ROLE_PHASES: dict[str, tuple[str, ...]] = {
-    "reviewer": ("plan-review", "code-review"),
-    "coder": ("dev",),
-    "closer": ("close",),
+
+# 阶段 → 角色（--role 过滤与角色正文复用）
+PHASE_ROLE: dict[str, str] = {
+    "plan-review": "reviewer",
+    "dev": "coder",
+    "code-review": "reviewer",
+    "close": "closer",
 }
 
-# 角色 → modelRoles 角色键（与 omp.json agent_types 值一致；审查共用 sage_reviewer 键）
-ROLE_MODEL_ROLE: dict[str, str] = {
-    "reviewer": "sage_reviewer",
-    "coder": "sage_coder",
-    "closer": "sage_closer",
+# 阶段 → modelRoles 角色键 / agent 名（与 omp.json agent_types 值一致；每阶段独立键，可配不同模型）
+PHASE_MODEL_ROLE: dict[str, str] = {
+    "plan-review": "sage_plan_reviewer",
+    "dev": "sage_coder",
+    "code-review": "sage_code_reviewer",
+    "close": "sage_closer",
 }
+PHASE_AGENT_NAME: dict[str, str] = PHASE_MODEL_ROLE
 
 # 宿主用户注册目录（--user 部署目标；OMP 用户级结构为 ~/.omp/agent/config.yml + ~/.omp/agent/agents/*.md）
 USER_AGENT_DIR: Path = Path.home() / ".omp" / "agent"
-
-# 角色 → agent 名（frontmatter name；与 omp.json agent_types 值一致）
-ROLE_AGENT_NAME: dict[str, str] = ROLE_MODEL_ROLE
 
 AGENT_TOOLS = {
     "reviewer": "read, write, edit, grep, glob, bash, web_search, lsp",
@@ -60,9 +63,10 @@ AGENT_TOOLS = {
 }
 
 AGENT_DESCRIPTIONS: dict[str, str] = {
-    "reviewer": "SAGE reviewer 子代理（plan-review 计划盲审 + code-review 代码盲审）",
-    "coder": "SAGE coder 子代理（dev 阶段实现）",
-    "closer": "SAGE closer 子代理（close 阶段收尾）",
+    "plan-review": "SAGE reviewer 子代理（plan-review 计划盲审）",
+    "dev": "SAGE coder 子代理（dev 阶段实现）",
+    "code-review": "SAGE reviewer 子代理（code-review 代码盲审）",
+    "close": "SAGE closer 子代理（close 阶段收尾）",
 }
 
 ROLE_BODY = {
@@ -95,7 +99,7 @@ ROLE_BODY = {
 # 注释，避免增量合并逐次重复堆积（2026-10-25 实测：裸跑一次 +4 行）。
 _GENERATED_HEADER_LINES = (
     "# OMP modelRoles 配置（SAGE 适配器生成）",
-    "# 三角色独立键；审查（sage_reviewer）覆盖 plan-review+code-review 两阶段，模型值来自 omp.json models.<phase>.id。",
+    "# 四阶段独立键；模型值来自 omp.json models.<phase>.id，两个审查阶段可分别配置不同模型。",
     "# 跨模型异构盲审：将 plan-review/code-review 阶段的模型配为与 default（主会话模型）不同厂商的模型。",
 )
 
@@ -117,7 +121,7 @@ def detect_repo_root() -> Path | None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="生成 OMP .omp/ 目录三件套：config.yml（modelRoles）+ agents/sage-*.md（自定义 agent 定义）"
+        description="生成 OMP .omp/ 配置：config.yml（modelRoles）+ agents/sage_*.md（自定义 agent 定义）"
     )
     parser.add_argument(
         "--target-dir",
@@ -133,7 +137,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--role",
         choices=PROVISION_ROLES,
-        help="只生成指定角色（reviewer 生成 sage_reviewer 一个 agent）；缺省生成全部",
+        help="只生成指定角色（reviewer 生成 plan-review + code-review 两个 agent）；缺省生成全部",
     )
     parser.add_argument(
         "--force",
@@ -169,131 +173,229 @@ def load_omp_json() -> tuple[dict[str, Any], str]:
     return (models if isinstance(models, dict) else {}), str(candidate)
 
 
-def role_model_id(role: str, models: dict[str, Any]) -> tuple[str | None, str | None]:
-    """返回角色的模型标识符与告警：审查角色取 plan-review 首个非空，与 code-review 不一致时告警。"""
-    phases = ROLE_PHASES[role]
-    ids = [models.get(phase, {}).get("id") or None for phase in phases]
-    model_id = next((item for item in ids if item), None)
-    distinct = {item for item in ids if item}
-    warning = None
-    if len(distinct) > 1:
-        warning = f"{role} 各阶段默认模型不一致：{sorted(distinct)}；已采用 {model_id}"
+def phase_model_id(phase: str, models: dict[str, Any]) -> tuple[str | None, str | None]:
+    """返回该阶段的模型标识符与告警：只读本阶段 models.<phase>.id，不做跨阶段一致性约束。
+
+    两个审查阶段各有独立 modelRoles 键，因此可以配不同模型；需要同一模型时在
+    plan-review 与 code-review 两处填相同 id 即可。
+    """
+    model_id = models.get(phase, {}).get("id") or None
     if not model_id:
-        warning = f"未解析到 {role} 默认模型；请在 omp.json 对应阶段 models.id 填入模型标识符"
-    return model_id, warning
+        return None, f"未解析到 {phase} 阶段模型；请在 omp.json models.{phase}.id 填入模型标识符"
+    return model_id, None
 
 
-def build_modelroles_block(roles: list[str], models: dict[str, Any]) -> tuple[str, list[str]]:
-    """生成 config.yml 的 modelRoles 段文本（含 modelRoles: 键和子键）；三角色独立键 + advisor 固定键。
+ADVISOR_LINE = (
+    "advisor: <advisor-provider/model>  # 可选第二遍审查角色；在 sage_*.md frontmatter 加 advisor: true 后生效；"
+    "配置为第三厂商可实现三重异构审查"
+)
+_GENERATED_TRAILER_LINES = (
+    "# 注意：default 角色由 OMP 运行时设置，本脚本不写入；",
+    "#       如需修改 default 模型，请在 config.yml 中单独设置。",
+)
+# agent frontmatter 中由脚本管理的键；其余键（如用户按文档加的 advisor: true）原样保留
+_MANAGED_FRONTMATTER_KEYS = ("name", "description", "tools", "spawns", "model")
 
-    模型值从 omp.json models.<phase>.id 读取（用户填实际模型标识符）。
-    审查角色共用 sage_reviewer 键，模型取 plan-review 首个非空；未填写时写占位符并告警。
+
+def build_modelrole_entries(phases: list[str], models: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
+    """返回「受管键 → 该行内容」映射与告警；只包含本次 phases 对应的键。
+
+    模型值从 omp.json models.<phase>.id 读取（用户填实际模型标识符），逐阶段独立，
+    不做跨阶段一致性约束；未填写时写占位符并告警。
     """
     warnings: list[str] = []
-    lines = [
+    entries: dict[str, str] = {}
+    for phase in phases:
+        alias = PHASE_MODEL_ROLE[phase]
+        model_id, phase_warning = phase_model_id(phase, models)
+        if phase_warning:
+            warnings.append(phase_warning)
+        if model_id:
+            entries[alias] = f"{alias}: {model_id}    # SAGE 角色：{PHASE_ROLE[phase]}（阶段：{phase}）"
+        else:
+            entries[alias] = f"{alias}: <{alias}-provider/model>    # ⚠️ 未配置：请在 omp.json models.{phase}.id 填入模型标识符"
+    if not phases:
+        warnings.append("未生成任何角色映射")
+    return entries, warnings
+
+
+def render_modelroles_section(entries: dict[str, str]) -> list[str]:
+    """渲染全新的 modelRoles 段（含注释头与尾部说明）；仅用于 config.yml 不存在时新建。"""
+    lines = [*_GENERATED_HEADER_LINES, "", "modelRoles:"]
+    lines.extend(f"  {value}" for value in entries.values())
+    lines.append(f"  {ADVISOR_LINE}")
+    lines.extend(["", *_GENERATED_TRAILER_LINES])
+    return lines
+
+
+def _section_key(line: str) -> str | None:
+    """返回 modelRoles 子键名；注释、空行与非缩进行返回 None。"""
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or line[:1] not in (" ", "\t"):
+        return None
+    return stripped.split(":", 1)[0].strip() or None
+
+
+def merge_config_yml(existing_text: str, entries: dict[str, str]) -> tuple[str, list[str]]:
+    """按配置键增量合并 config.yml，返回新文本与被保留的用户键名。
+
+    只改写本次生成涉及的 modelRoles 子键（`entries` 的键），其余一律保留：
+    - 其他顶层段（settings/task 等）原样保留；
+    - modelRoles 下的自定义键原样保留；
+    - 用户已填的 `advisor` 原样保留（缺失时才补占位符）；
+    - 段内用户注释保留，仅剥离上次生成的注释头/尾部说明，避免逐次堆积。
+    这样 `--role` 局部刷新不会再删掉其他阶段的键。
+    """
+    lines = existing_text.splitlines()
+    start = next(
+        (i for i, line in enumerate(lines)
+         if line[:1] not in (" ", "\t") and line.strip().startswith("modelRoles:")),
+        None,
+    )
+    if start is None:
+        preserved = [line for line in lines if line.strip() not in _generated_noise()]
+        while preserved and preserved[-1].strip() == "":
+            preserved.pop()
+        section = render_modelroles_section(entries)
+        text = "\n".join(preserved + ([""] if preserved else []) + section) + "\n"
+        return text, []
+
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        line = lines[i]
+        if line and line[:1] not in (" ", "\t") and not line.strip().startswith("#"):
+            end = i
+            break
+
+    noise = _generated_noise()
+    existing_managed: dict[str, str] = {}
+    user_lines: list[str] = []
+    user_keys: list[str] = []
+    for line in lines[start + 1 : end]:
+        key = _section_key(line)
+        if key is None:
+            if line.strip() in noise:
+                continue
+            user_lines.append(line)
+            continue
+        if key in _all_managed_aliases():
+            # 脚本管理的键：旧行丢弃，稍后按阶段顺序统一重排
+            existing_managed.setdefault(key, line)
+            continue
+        user_keys.append(key)
+        user_lines.append(line)
+    # 受管键按阶段顺序输出：本次生成的值优先，未涉及的阶段保留原值（--role 局部刷新不丢键）
+    kept: list[str] = []
+    for alias in _all_managed_aliases():
+        if alias in entries:
+            kept.append(f"  {entries[alias]}")
+        elif alias in existing_managed:
+            kept.append(existing_managed[alias])
+    if "advisor" not in user_keys:
+        kept.append(f"  {ADVISOR_LINE}")
+    kept.extend(user_lines)
+    while kept and kept[-1].strip() == "":
+        kept.pop()
+
+    before = lines[:start]
+    # 剥离上一次生成的注释头（可能隔着空行），避免逐次重复堆积
+    while before and (before[-1].strip() == "" or before[-1].strip() in noise):
+        before.pop()
+    rebuilt = [
+        *before,
+        *([""] if before else []),
         *_GENERATED_HEADER_LINES,
         "",
         "modelRoles:",
+        *kept,
+        "",
+        *_GENERATED_TRAILER_LINES,
     ]
-    for role in roles:
-        alias = ROLE_MODEL_ROLE[role]
-        model_id, role_warning = role_model_id(role, models)
-        if role_warning:
-            warnings.append(role_warning)
-        if model_id:
-            lines.append(f"  {alias}: {model_id}    # SAGE 角色：{role}（阶段：{'/'.join(ROLE_PHASES[role])}）")
-        else:
-            lines.append(f"  {alias}: <{alias}-provider/model>    # ⚠️ 未配置：请在 omp.json 对应阶段 models.id 填入模型标识符")
-    advisor_desc = "可选第二遍审查角色；在 sage-*.md frontmatter 加 advisor: true 后生效；配置为第三厂商可实现三重异构审查"
-    lines.append(f"  advisor: <advisor-provider/model>  # {advisor_desc}")
-    lines.extend(
-        [
-            "",
-            "# 注意：default 角色由 OMP 运行时设置，本脚本不写入；",
-            "#       如需修改 default 模型，请在 config.yml 中单独设置。",
-        ]
-    )
-    if not roles:
-        warnings.append("未生成任何角色映射")
-    return "\n".join(lines) + "\n", warnings
+    after = lines[end:]
+    if after:
+        rebuilt.extend([""] + after)
+    return "\n".join(rebuilt) + "\n", user_keys
 
 
-def build_agent_md(role: str) -> str:
-    """生成单个角色的 agent 定义 Markdown（frontmatter + SAGE 角色契约正文）。"""
-    name = ROLE_AGENT_NAME[role]
+def _generated_noise() -> set[str]:
+    """本脚本生成过、合并时应剥离而不应重复堆积的行（去空白后比较）。"""
+    return {line.strip() for line in (*_GENERATED_HEADER_LINES, *_GENERATED_TRAILER_LINES)}
+
+
+def _all_managed_aliases() -> tuple[str, ...]:
+    """脚本管理的全部 modelRoles 键（固定阶段顺序），用于合并时稳定排序与保留未刷新阶段。"""
+    return tuple(PHASE_MODEL_ROLE[phase] for phase in PHASE_MODEL_ROLE)
+
+
+def build_agent_md(phase: str, existing_text: str | None = None) -> str:
+    """生成单个阶段的 agent 定义 Markdown（frontmatter + SAGE 角色契约正文）。
+
+    已存在文件时保留用户添加的 frontmatter 键（如按文档加的 `advisor: true`），
+    只改写脚本管理的键与正文。
+    """
+    name = PHASE_AGENT_NAME[phase]
+    role = PHASE_ROLE[phase]
+    managed = {
+        "name": name,
+        "description": AGENT_DESCRIPTIONS[phase],
+        "tools": AGENT_TOOLS[role],
+        "spawns": '"*"',
+        "model": f'"@{PHASE_MODEL_ROLE[phase]}"',
+    }
+    frontmatter: list[str] = []
+    if existing_text:
+        fm_lines = _frontmatter_lines(existing_text)
+        for line in fm_lines:
+            key = line.split(":", 1)[0].strip() if ":" in line else None
+            if key in _MANAGED_FRONTMATTER_KEYS:
+                continue
+            frontmatter.append(line)
+    for key in _MANAGED_FRONTMATTER_KEYS:
+        frontmatter.append(f"{key}: {managed[key]}")
     return (
         "---\n"
-        f"name: {name}\n"
-        f"description: {AGENT_DESCRIPTIONS[role]}\n"
-        f"tools: {AGENT_TOOLS[role]}\n"
-        'spawns: "*"\n'
-        f'model: "@{ROLE_MODEL_ROLE[role]}"\n'
-        "---\n"
-        "\n"
-        f"{ROLE_BODY[role]}\n"
+        + "\n".join(frontmatter)
+        + "\n---\n\n"
+        + f"{ROLE_BODY[role]}\n"
     )
 
 
-def merge_config_yml(existing_text: str, new_modelroles_block: str) -> str:
-    """增量合并：保留已有 config.yml 中非 modelRoles 段，替换 modelRoles 段为新生成内容。
+def _frontmatter_lines(text: str) -> list[str]:
+    """提取 YAML frontmatter 行；没有 frontmatter 时返回空列表。"""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return []
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            return [line for line in lines[1:index] if line.strip()]
+    return []
 
-    策略：逐行扫描，剔除 `modelRoles:` 到下一个顶层键之间的行（即旧 modelRoles 段），
-    其余行保留；最终输出 = 保留段 + 新 modelRoles 段。
 
-    生成块自带注释头。若保留段里已含这些注释（上一次生成留下的），会被当成
-    「非 modelRoles 段」逐次重复堆积——2026-10-25 实测每次裸跑 +4 行。故合并前先从
-    保留段剥离这些注释及紧随其后的空行，由生成块统一重新输出。
-    """
-    preserved: list[str] = []
-    in_modelroles = False
-    for line in existing_text.splitlines():
-        stripped = line.strip()
-        # 顶层键判定：无缩进且含冒号
-        if not line.startswith((" ", "\t")) and ":" in stripped:
-            key = stripped.split(":", 1)[0].strip()
-            in_modelroles = (key == "modelRoles")
-            if not in_modelroles:
-                preserved.append(line)
-            # modelRoles 行本身被丢弃（由 new_block 替换）
-            continue
-        # 非顶层行：在 modelRoles 段内则丢弃，在其他段内则保留
-        if in_modelroles:
-            continue
-        preserved.append(line)
-    # 清理末尾多余空行
-    while preserved and preserved[-1].strip() == "":
-        preserved.pop()
-    # 剥离生成块注释头（见 docstring）：避免增量合并逐次重复堆积
-    header = [ln.strip() for ln in _GENERATED_HEADER_LINES]
-    idx = 0
-    while idx < len(preserved):
-        end = idx + len(header)
-        if [ln.strip() for ln in preserved[idx:end]] == header:
-            del preserved[idx:end]
-            while idx < len(preserved) and preserved[idx].strip() == "":
-                del preserved[idx]
-            continue
-        idx += 1
-    while preserved and preserved[-1].strip() == "":
-        preserved.pop()
-    if preserved:
-        return "\n".join(preserved) + "\n\n" + new_modelroles_block
-    return new_modelroles_block
+def _has_unmanaged_frontmatter(text: str) -> bool:
+    """判断已有 agent 文件是否含脚本管理范围外的 frontmatter 键（用户手加）。"""
+    return any(
+        (line.split(":", 1)[0].strip() if ":" in line else None) not in _MANAGED_FRONTMATTER_KEYS
+        for line in _frontmatter_lines(text)
+    )
 
 
 def provision(args: argparse.Namespace) -> dict[str, Any]:
-    """按角色生成 agents/sage-<role>.md + config.yml。
+    """按阶段生成 agents/sage_*.md + config.yml。
 
     写入语义：
-    - agent 文件：一律覆盖。内容完全由 role 决定（frontmatter `model` 是角色别名，真模型在
-      config.yml 解析），不含用户手改价值，故不设跳过保护；`--force` 不再影响它。
-    - config.yml：不存在→写入（新建）；存在+不带 --force→增量合并（保留非 modelRoles 段，替换
-      modelRoles 段，剥离上次生成的注释头防堆积）；存在+--force→整文件覆盖（会丢自定义段）
+    - agent 文件：一律覆盖脚本管理的 frontmatter 键与正文；用户添加的其他 frontmatter 键
+      （如按文档加的 `advisor: true`）原样保留。
+    - config.yml：不存在→新建；存在+不带 --force→按配置键增量合并（只更新本次生成涉及的
+      modelRoles 子键，其他顶层段、自定义 modelRoles 键、用户已填的 advisor 一律保留）；
+      存在+--force→整文件覆盖（会丢自定义段，显式告警）
     - 目标目录：bootstrap 布局默认 <脚本所在项目根>/.omp（与 omp.json 同项目）；否则 <当前目录>/.omp；
       --user → ~/.omp/agent（宿主用户注册目录）
     """
     models, models_source = load_omp_json()
-    roles = [args.role] if args.role else list(PROVISION_ROLES)
+    if args.role:
+        phases = [phase for phase, role in PHASE_ROLE.items() if role == args.role]
+    else:
+        phases = list(PHASE_MODEL_ROLE)
 
     target_dir = args.target_dir.resolve()
     agents_dir = target_dir / "agents"
@@ -301,33 +403,34 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
     agents_dir.mkdir(parents=True, exist_ok=True)
 
     results: list[dict[str, Any]] = []
-    for role in roles:
-        content = build_agent_md(role)
-        target_path = agents_dir / f"{ROLE_AGENT_NAME[role]}.md"
-        target_path.write_text(content, encoding="utf-8")
-        results.append({"role": f"agent:{role}", "path": str(target_path), "status": "written", "note": None})
+    for phase in phases:
+        target_path = agents_dir / f"{PHASE_AGENT_NAME[phase]}.md"
+        existing_agent = target_path.read_text(encoding="utf-8") if target_path.is_file() else None
+        target_path.write_text(build_agent_md(phase, existing_agent), encoding="utf-8")
+        note = "保留用户添加的 frontmatter 键" if existing_agent and _has_unmanaged_frontmatter(existing_agent) else None
+        results.append({"role": f"agent:{phase}", "path": str(target_path), "status": "written", "note": note})
 
     # config.yml（modelRoles 段）
-    modelroles_block, warnings = build_modelroles_block(roles, models)
+    entries, warnings = build_modelrole_entries(phases, models)
 
     config_path = target_dir / "config.yml"
     if config_path.exists() and not args.force:
-        # 增量合并：保留非 modelRoles 段，替换 modelRoles 段
         existing = config_path.read_text(encoding="utf-8")
-        merged = merge_config_yml(existing, modelroles_block)
+        merged, user_keys = merge_config_yml(existing, entries)
         config_path.write_text(merged, encoding="utf-8")
         extra = detect_non_modelroles_sections(existing)
-        note = f"增量合并：保留非 modelRoles 段（{extra}）" if extra else "增量合并"
+        details = [f"非 modelRoles 段（{extra}）"] if extra else []
+        if user_keys:
+            details.append(f"modelRoles 用户键（{', '.join(user_keys)}）")
+        note = f"增量合并：保留{'、'.join(details)}" if details else "增量合并"
         results.append({"role": "config:modelroles", "path": str(config_path), "status": "written", "note": note})
     elif config_path.exists() and args.force:
-        # --force：整文件覆盖（丢失非 modelRoles 段，已告警）
         extra = detect_non_modelroles_sections(config_path.read_text(encoding="utf-8"))
-        config_path.write_text(modelroles_block, encoding="utf-8")
+        config_path.write_text("\n".join(render_modelroles_section(entries)) + "\n", encoding="utf-8")
         note = f"警告: --force 整文件覆盖，丢失非 modelRoles 段: {extra}" if extra else None
         results.append({"role": "config:modelroles", "path": str(config_path), "status": "written", "note": note})
     else:
-        # 不存在 → 新建
-        config_path.write_text(modelroles_block, encoding="utf-8")
+        config_path.write_text("\n".join(render_modelroles_section(entries)) + "\n", encoding="utf-8")
         results.append({"role": "config:modelroles", "path": str(config_path), "status": "written", "note": None})
 
     if warnings:
@@ -339,9 +442,9 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
     is_user_dir = target_dir == USER_AGENT_DIR.resolve()
     post_steps = [
         "如 omp.json 中某阶段 models.id 为 null，config.yml 对应阶段角色为占位符 <provider/model>；请在 omp.json 填入实际模型标识符后重新 provision，或直接编辑 config.yml 替换占位符。",
-        f"确认 agents/sage-*.md 位于 {'~/.omp/agent/agents/' if is_user_dir else '<repo>/.omp/agents/'} 下；OMP 从该目录发现自定义 agent（项目优先于用户级与内置）。",
-        "重启或刷新 OMP；在 /agents 面板确认 sage_reviewer/sage_coder/sage_closer 可见，在 /model 的 Roles 视图确认同名角色。",
-        "跨模型异构盲审：将 omp.json 中 plan-review/code-review 阶段的 models.id 配置为与 default（主会话模型）不同厂商的模型（两阶段共用 sage_reviewer 键，取 plan-review 值）。",
+        f"确认 agents/sage_*.md 位于 {'~/.omp/agent/agents/' if is_user_dir else '<repo>/.omp/agents/'} 下；OMP 从该目录发现自定义 agent（项目优先于用户级与内置）。",
+        "重启或刷新 OMP；在 /agents 面板确认 sage_plan_reviewer/sage_coder/sage_code_reviewer/sage_closer 可见，在 /model 的 Roles 视图确认同名角色。",
+        "跨模型异构盲审：plan-review 与 code-review 各有独立 modelRoles 键，可分别配不同厂商模型；想用同一模型时在两处填相同 id。",
         "config.yml：不带 --force 时增量合并（保留自定义段，只替换 modelRoles 段）；带 --force 时整文件覆盖（会丢失自定义段）。agent 文件一律覆盖，不含手改内容。",
     ]
 

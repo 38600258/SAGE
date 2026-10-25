@@ -16,10 +16,10 @@
 ## 自动派发
 
 1. L1 及以上进入 reviewer/coder/closer 阶段前，运行项目本地 `scripts/sage_dispatch.py prepare`；尚未 bootstrap 时运行 Skill 内置 `core/scripts/dispatch_phase.py prepare`。
-2. `codex.json` 将四个阶段映射为 `sage_reviewer`、`sage_coder`、`sage_reviewer`、`sage_closer`。当 `prepare` 返回 `action=spawn_subagent` 时，Main Agent 必须立即调用 Codex 当前可用的原生 subagent API，并只传信封中的 `prompt`。
+2. `codex.json` 将四个阶段映射为 `sage_plan_reviewer`、`sage_coder`、`sage_code_reviewer`、`sage_closer`。当 `prepare` 返回 `action=spawn_subagent` 时，Main Agent 必须立即调用 Codex 当前可用的原生 subagent API，并只传信封中的 `prompt`。
 3. subagent 完成后运行 `verify --receipt <path>`；只有 TASK 对应章节和 Git 状态出现有效产出才算成功。
 4. `status` 读取协议状态；`cancel` 只标记 `host_cancel_required`，Main Agent 仍须调用 Codex 原生取消/关闭能力。
-5. `codex.json` 的模型绑定为 `agent-registration`：`plan-review`/`code-review` 使用 `gpt-5.6-sol`，`dev` 使用 `gpt-5.6-terra`，`close` 使用 `gpt-5.6-luna`。这些值必须与宿主 `sage_reviewer`、`sage_coder`、`sage_closer` 注册配置一致，单次 `--model` 不能覆盖。
+5. `codex.json` 的模型绑定为 `agent-registration`：`plan-review`/`code-review` 各用各的注册文件，默认同为 `gpt-5.6-sol`（想异构就在 `codex.json` 两处填不同 id），`dev` 使用 `gpt-5.6-terra`，`close` 使用 `gpt-5.6-luna`。这些值必须与宿主 `sage_plan_reviewer`、`sage_coder`、`sage_code_reviewer`、`sage_closer` 注册配置一致，单次 `--model` 不能覆盖。
 
 示例：
 
@@ -30,7 +30,7 @@ uv run python scripts/sage_dispatch.py verify --receipt <receipt> --format json
 
 ## 子代理配置生成（provision）
 
-Codex 自定义 agent 是 TOML 注册文件（`sage_reviewer.toml`/`sage_coder.toml`/`sage_closer.toml`），需放置到宿主注册目录才能被原生 subagent 派发。`provision` 生成：
+Codex 自定义 agent 是 TOML 注册文件（`sage_plan_reviewer.toml`/`sage_coder.toml`/`sage_code_reviewer.toml`/`sage_closer.toml`），需放置到宿主注册目录才能被原生 subagent 派发。`provision` 生成：
 
 ```powershell
 # 不带参数：默认生成到 <脚本所在项目根>/.codex/agents（项目目录），随仓库版本管理
@@ -45,11 +45,11 @@ uv run python docs/guides/execution-adapters/codex/provision.py --target-dir C:\
 
 复制/部署方式（给 AI 看的一句话自动部署）：
 
-- **项目目录（默认）**：运行 `provision.py`（不带参数），生成 `<repo>/.codex/agents/`（3 个 TOML），随仓库版本管理；从任意目录运行都定位到脚本所在仓库。
-- **用户目录（--user）**：运行 `provision.py --user`，生成 `~/.codex/agents/`（3 个 TOML），全局配置、多项目共享。
-- **手动复制**：把 `sage_reviewer.toml`/`sage_coder.toml`/`sage_closer.toml` 复制到 `.codex/agents/`（项目）或 `~/.codex/agents/`（个人）。
+- **项目目录（默认）**：运行 `provision.py`（不带参数），生成 `<repo>/.codex/agents/`（4 个 TOML），随仓库版本管理；从任意目录运行都定位到脚本所在仓库。
+- **用户目录（--user）**：运行 `provision.py --user`，生成 `~/.codex/agents/`（4 个 TOML），全局配置、多项目共享。
+- **手动复制**：把 4 个 `sage_*.toml` 复制到 `.codex/agents/`（项目）或 `~/.codex/agents/`（个人）。
 
-写入语义：模型写进 TOML 本体的 `model` 字段，与 adapter JSON 的 `models.<phase>.id` 是两个真相源。已存在+不带 `--force` 时**不静默跳过**，而是比对两者——一致判 `skipped`，不一致判 `drift` 并提示加 `--force`，避免改了 `codex.json` 却以为已生效；`--force` 一律覆盖。
+写入语义：模型写进 TOML 本体的 `model` 字段，与 adapter JSON 的 `models.<phase>.id` 是两个真相源。已存在+不带 `--force` 时**不静默跳过**，而是逐阶段比对两者——一致判 `skipped`，不一致判 `drift` 并提示加 `--force`，避免改了 `codex.json` 却以为已生效；`--force` 一律覆盖。两个审查阶段是独立 TOML，可各配不同模型；想用同一模型时在 `codex.json` 两处填相同 id。
 
 ## 失败恢复
 

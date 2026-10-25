@@ -13,9 +13,9 @@
     "isolation": "context-fresh",
     "requires_authorization": true,
     "agent_types": {
-      "plan-review": "sage_reviewer",
+      "plan-review": "sage_plan_reviewer",
       "dev": "sage_coder",
-      "code-review": "sage_reviewer",
+      "code-review": "sage_code_reviewer",
       "close": "sage_closer"
     },
     "notes": "宿主无命名注册，派发时注入 ROLE_PROMPT；隔离等级为上下文级（模型级隔离取决于宿主当前模型与执行方差异），隔离等级须写回 TASK 证据链；不要求逐次人工授权（T-018 裁决：人工确认点收敛为计划放行门）。"

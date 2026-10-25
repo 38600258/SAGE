@@ -120,7 +120,7 @@ uv run python scripts/sage_dispatch.py cancel --receipt <receipt> --reason <原�
 ### 5.1 Reviewer Subagent
 
 ```text
-agent_type = "sage_reviewer"  # 项目可替换为本工具实际 reviewer subagent 名称
+agent_type = "sage_plan_reviewer"  # 项目可替换为本工具实际 reviewer subagent 名称（plan-review/code-review 可各用独立 agent）
 
 REPO_ROOT=<仓库根目录绝对路径>
 TASK_PATH=<TASK 文档绝对路径>
@@ -176,7 +176,7 @@ uv run python scripts/sage_dispatch.py provision --repo-root <repo> --adapter co
 # Claude Code 等项目内 agents 目录（随仓库版本化）
 uv run python scripts/sage_dispatch.py provision --repo-root <repo> --adapter claude-code --target-dir <repo>\.claude\agents
 
-# OMP 项目 .omp/ 目录三件套（config.yml modelRoles + agents/sage_reviewer/sage_coder/sage_closer.md；模型值直接来自 omp.json models.<phase>.id）
+# OMP 项目 .omp/ 目录（config.yml modelRoles + agents/sage_plan_reviewer/sage_coder/sage_code_reviewer/sage_closer.md；模型值直接来自 omp.json models.<phase>.id）
 uv run python scripts/sage_dispatch.py provision --repo-root <repo> --adapter omp --target-dir <repo>\.omp
 ```
 

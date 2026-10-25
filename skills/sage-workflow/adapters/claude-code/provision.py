@@ -18,10 +18,21 @@ from typing import Any
 
 
 PROVISION_ROLES = ("reviewer", "coder", "closer")
-ROLE_PHASES = {
-    "reviewer": ("plan-review", "code-review"),
-    "coder": ("dev",),
-    "closer": ("close",),
+
+# 阶段 → 角色（--role 过滤与角色正文复用）
+PHASE_ROLE = {
+    "plan-review": "reviewer",
+    "dev": "coder",
+    "code-review": "reviewer",
+    "close": "closer",
+}
+
+# 阶段 → 注册 agent 名（与 claude-code.json agent_types 值一致；每阶段独立注册文件）
+PHASE_AGENT_NAME = {
+    "plan-review": "sage-plan-reviewer",
+    "dev": "sage-coder",
+    "code-review": "sage-code-reviewer",
+    "close": "sage-closer",
 }
 
 # 写入注册文件的角色级指令：与派发信封的角色契约互补，只约束执行载体层行为
@@ -86,13 +97,16 @@ def load_models_source() -> str:
     return str(candidate)
 
 
-def build_markdown_agent(role: str) -> str:
-    """生成单个角色的 Markdown 注册内容：frontmatter 声明名称与工具，正文指向角色契约。"""
-    phases = ", ".join(ROLE_PHASES[role])
+def build_markdown_agent(phase: str) -> str:
+    """生成单个阶段的 Markdown 注册内容：frontmatter 声明名称与工具，正文指向角色契约。
+
+    每阶段独立注册文件，因此可在各自 frontmatter 补 `model:` 使用不同模型。
+    """
+    role = PHASE_ROLE[phase]
     return (
         "---\n"
-        f"name: sage-{role}\n"
-        f"description: SAGE {role} 子代理（阶段：{phases}）。按仓库当前权威 {role} 角色契约执行，产出写回 TASK 对应章节。\n"
+        f"name: {PHASE_AGENT_NAME[phase]}\n"
+        f"description: SAGE {role} 子代理（阶段：{phase}）。按仓库当前权威 {role} 角色契约执行，产出写回 TASK 对应章节。\n"
         "tools: Read, Write, Edit, Grep, Glob, Bash\n"
         "---\n"
         "\n"
@@ -104,27 +118,30 @@ def build_markdown_agent(role: str) -> str:
 
 
 def provision(args: argparse.Namespace) -> dict[str, Any]:
-    """按角色循环生成 sage-<role>.md。
+    """按阶段循环生成 sage-<phase>.md。
 
-    一律覆盖：Markdown 注册不绑定模型（模型由宿主默认值决定），内容完全由 role 决定，
+    一律覆盖：Markdown 注册默认不绑定模型（模型由宿主默认值决定），内容完全由阶段决定，
     不含用户手改价值，故不设跳过保护；`--force` 不再影响它。
     """
     target_dir = args.target_dir.resolve()
-    roles = [args.role] if args.role else list(PROVISION_ROLES)
+    if args.role:
+        phases = [phase for phase, role in PHASE_ROLE.items() if role == args.role]
+    else:
+        phases = list(PHASE_AGENT_NAME)
     models_source = load_models_source()
 
     target_dir.mkdir(parents=True, exist_ok=True)
     results: list[dict[str, Any]] = []
-    for role in roles:
-        filename = f"sage-{role}.md"
-        content = build_markdown_agent(role)
+    for phase in phases:
+        filename = f"{PHASE_AGENT_NAME[phase]}.md"
+        content = build_markdown_agent(phase)
         target_path = target_dir / filename
         target_path.write_text(content, encoding="utf-8")
-        results.append({"role": role, "path": str(target_path), "status": "written", "note": None})
+        results.append({"role": phase, "path": str(target_path), "status": "written", "note": None})
     post_steps = [
         "重启或刷新宿主以加载新的 agent 注册；注册是否生效以宿主实际派发结果为准。",
         f"目标目录为 {'~/.claude/agents（宿主用户注册目录，--user）' if args.user else '项目 .claude/agents（默认；随仓库版本管理）'}；用户目录为全局配置，请人工确认放置位置。",
-        "Markdown 注册不绑定模型；模型由宿主默认值决定，如需固定模型请在注册文件 frontmatter 中人工补充。",
+        "Markdown 注册默认不绑定模型；两个审查阶段是独立文件（sage-plan-reviewer / sage-code-reviewer），需要不同模型时在各自 frontmatter 补 model，想用同一模型就写相同的值。",
     ]
     return {
         "adapter": "claude-code",

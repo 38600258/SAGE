@@ -10,38 +10,38 @@
 
 ## 原生子代理映射
 
-OMP 的 `task` 工具可派发命名子代理，子代理启动时无对话历史，天然满足盲审上下文隔离。`omp.json` 将四个 SAGE 阶段映射为**三个自定义 agent**（provision 生成的 `agents/sage-*.md`），与 codex 适配器命名完全一致：
+OMP 的 `task` 工具可派发命名子代理，子代理启动时无对话历史，天然满足盲审上下文隔离。`omp.json` 将四个 SAGE 阶段映射为**四个自定义 agent**（provision 生成的 `agents/sage_*.md`），每阶段独立 agent + 独立 modelRoles 键，因此可以分别配置不同模型：
 
 | SAGE 阶段 | agent_type（agent 名） | modelRoles 键（provision 内部） | 路由到的角色用途 |
 |-----------|------------------------|-------------------------------|-----------------|
-| `plan-review` | `sage_reviewer` | `@sage_reviewer` | 深度推理计划盲审 |
-| `code-review` | `sage_reviewer` | `@sage_reviewer` | 深度推理代码盲审 |
+| `plan-review` | `sage_plan_reviewer` | `@sage_plan_reviewer` | 深度推理计划盲审 |
 | `dev` | `sage_coder` | `@sage_coder` | 通用 task 执行 |
+| `code-review` | `sage_code_reviewer` | `@sage_code_reviewer` | 深度推理代码盲审 |
 | `close` | `sage_closer` | `@sage_closer` | 收尾归档 |
 
 > - 内置 `reviewer.md` 与 `task` agent（官方 `agents.ts` 为 `task` 注入 `model: "@task"`）虽能路由到 `modelRoles.slow`/`modelRoles.task`，但其 system prompt 是 OMP 协议（"Find bugs…" / "Worker agent: delegated tasks"），**不是 SAGE 角色契约**——行为训导与 SAGE 契约冲突。
-> - 自定义 agent 由 provision 生成，正文承载 SAGE 角色契约，frontmatter `model` 显式声明对应 modelRoles 键，模型路由完整闭环。审查两阶段共用 `sage_reviewer` 键，dev/close 各自独立键。
+> - 自定义 agent 由 provision 生成，正文承载 SAGE 角色契约，frontmatter `model` 显式声明对应 modelRoles 键，模型路由完整闭环。两个审查阶段各有独立键，可各配不同模型；想用同一模型时在 `omp.json` 两处填同一个 id。
 
 ## 模型路由
 
 OMP 是 provider-agnostic 的角色路由架构：模型不按请求指定，而是按角色（role）在配置中路由。模型链路：
 
 ```
-task 工具派发 agent: "sage_reviewer"
-  → agent frontmatter model: "@sage_reviewer"     ← provision 内部生成，用户无需关心
-  → modelRoles.sage_reviewer  →  具体 provider/model（来自 omp.json models.<phase>.id）
+task 工具派发 agent: "sage_plan_reviewer"（或 sage_code_reviewer）
+  → agent frontmatter model: "@sage_plan_reviewer"   ← provision 内部生成，用户无需关心
+  → modelRoles.sage_plan_reviewer  →  具体 provider/model（来自 omp.json models.<phase>.id）
 ```
 
-`omp.json` 的 `models.<phase>.id` 填**实际模型标识符**（如 `anthropic/claude-sonnet-4-5`、`litellm/deepseek-v4-flash`），与 codex.json 接口一致——用户在此处指定各阶段用什么模型。plan-review 与 code-review 共用 `sage_reviewer` 键，模型取 plan-review 的 id（首个非空），若 code-review 与 plan-review 不一致则 provision 告警（对齐 codex build_toml_agent 语义）。modelRoles 键名（`sage_reviewer` 等）是 provision 内部实现细节，不出现在 omp.json 中。`subagent_binding = "agent-registration"`：OMP 的 `task` 派发 API 不接受请求级 `model` 参数，模型由角色级配置决定，不能用单次 `--model` 覆盖。
+`omp.json` 的 `models.<phase>.id` 填**实际模型标识符**（如 `anthropic/claude-sonnet-4-5`、`litellm/deepseek-v4-flash`），与 codex.json 接口一致——用户在此处逐阶段指定模型，两个审查阶段互不约束。modelRoles 键名（`sage_plan_reviewer` 等）是 provision 内部实现细节，不出现在 omp.json 中。`subagent_binding = "agent-registration"`：OMP 的 `task` 派发 API 不接受请求级 `model` 参数，模型由角色级配置决定，不能用单次 `--model` 覆盖。
 
 未填写（`null`）时，provision 在 config.yml 对应角色写占位符并告警，用户可在 omp.json 补填后重新 provision，或直接编辑 config.yml 替换占位符。
 
 ### 模型路由实际生效范围
 
 > 四阶段均派发，全部 modelRoles 键生效（T-024 落地，编排契约束缚见 orchestrator.md——dev/close 为「coder/closer 必须子代理化」，主代理不得代行执行角色）：
-> - ✅ **plan-review**：sage_reviewer → modelRoles.sage_reviewer → 异构模型（**生效**）
+> - ✅ **plan-review**：sage_plan_reviewer → modelRoles.sage_plan_reviewer → 异构模型（**生效**）
 > - ✅ **dev**：sage_coder → modelRoles.sage_coder → 异构模型（**生效**，T-024 后）
-> - ✅ **code-review**：sage_reviewer → modelRoles.sage_reviewer → 异构模型（**生效**）
+> - ✅ **code-review**：sage_code_reviewer → modelRoles.sage_code_reviewer → 异构模型（**生效**）
 > - ✅ **close**：sage_closer → modelRoles.sage_closer → 异构模型（**生效**，T-024 后）
 >
 > dev/close 阶段同样派发执行型子代理，四阶段跨厂商异构模型路由完整生效。
@@ -66,14 +66,14 @@ task 工具派发 agent: "sage_reviewer"
 }
 ```
 
-provision 将上述值写入 `config.yml` 的 `modelRoles.sage_reviewer`（取 plan-review 值，code-review 不一致时告警）/`sage_coder`/`sage_closer`。`default` 角色由 OMP 运行时设置，不在 omp.json 中。
+provision 将上述值逐阶段写入 `config.yml` 的 `modelRoles.sage_plan_reviewer`/`sage_coder`/`sage_code_reviewer`/`sage_closer`——两个审查阶段各自独立，plan-review 与 code-review 可以配不同模型；想用同一模型时在两处填同一个 id。`default` 角色由 OMP 运行时设置，不在 omp.json 中。
 
 `advisor` 是 OMP 固定角色键。启用后，OMP 会在主会话/子代理完成后自动运行第二遍审查；将 `advisor` 设为第三厂商可实现三重异构审查。启用条件：在对应 sage-*.md frontmatter 加入 `advisor: true`，并在 config.yml 补 `advisor: <provider-C>/model-Z`（provision 不自动生成 advisor 值）。
 
 ## 自动派发
 
 1. L1 及以上进入 reviewer/coder/closer 阶段前，运行项目本地 `scripts/sage_dispatch.py prepare`；尚未 bootstrap 时运行 Skill 内置 `core/scripts/dispatch_phase.py prepare`。
-2. `omp.json` 将四个阶段各映射为 `sage_reviewer`/`sage_coder`/`sage_closer`（审查共用 sage_reviewer）。当 `prepare` 返回 `action=spawn_subagent` 时，Main Agent 必须立即调用 OMP 的 `task` 工具派发 `agent_type` 指定的子代理，并只传信封中的 `prompt`。
+2. `omp.json` 将四个阶段各映射为 `sage_plan_reviewer`/`sage_coder`/`sage_code_reviewer`/`sage_closer`。当 `prepare` 返回 `action=spawn_subagent` 时，Main Agent 必须立即调用 OMP 的 `task` 工具派发 `agent_type` 指定的子代理，并只传信封中的 `prompt`。
 3. subagent 完成后运行 `verify --receipt <path>`；只有 TASK 对应章节和 Git 状态出现有效产出才算成功。
 4. `status` 读取协议状态；`cancel` 只标记 `host_cancel_required`，Main Agent 仍须通过 `hub` 取消或关闭子代理。
 
@@ -86,7 +86,7 @@ uv run python scripts/sage_dispatch.py verify --receipt <receipt> --format json
 
 ## 子代理配置生成（provision）
 
-OMP 自定义 agent 需要配置文件才能被 `task` 工具派发。`provision` 生成 `.omp/` 目录（config.yml + 三角色 agent）：
+OMP 自定义 agent 需要配置文件才能被 `task` 工具派发。`provision` 生成 `.omp/` 目录（config.yml + 四阶段 agent）：
 
 ```powershell
 # 不带参数：默认生成到 <脚本所在项目根>/.omp（项目目录），config.yml 增量合并（保留已有非 modelRoles 段）
@@ -104,32 +104,35 @@ uv run python docs/guides/execution-adapters/omp/provision.py --force
 # 经主入口委托执行（bootstrap 后的项目内必须带 --repo-root）
 uv run python scripts/sage_dispatch.py provision --repo-root D:\repo --adapter omp
 
-# 只生成 reviewer 角色（生成 1 个 sage_reviewer agent）
+# 只生成 reviewer 角色（生成 sage_plan_reviewer + sage_code_reviewer 两个 agent）
 uv run python docs/guides/execution-adapters/omp/provision.py --role reviewer
 ```
 
 复制/部署方式（给 AI 看的一句话自动部署）：
 
-- **项目目录（默认）**：运行 `provision.py`（不带参数），生成 `<repo>/.omp/`（config.yml + agents/sage_reviewer.md、sage_coder.md、sage_closer.md），随仓库版本管理；从任意目录运行都定位到脚本所在仓库。
+- **项目目录（默认）**：运行 `provision.py`（不带参数），生成 `<repo>/.omp/`（config.yml + agents/sage_plan_reviewer.md、sage_coder.md、sage_code_reviewer.md、sage_closer.md），随仓库版本管理；从任意目录运行都定位到脚本所在仓库。
 - **用户目录（--user）**：运行 `provision.py --user`，生成 `~/.omp/agent/`（config.yml + agents/），全局配置、多项目共享，不污染仓库。
 - 手动复制：把项目生成的 `config.yml` 的 `modelRoles` 段合并到 `~/.omp/agent/config.yml`（全局）或 `<repo>/.omp/config.yml`（项目），把 `agents/*.md` 放到对应 `agents/` 目录。OMP 从该目录发现自定义 agent（项目优先于用户级与内置，first-wins 按 name 去重）。
 
-写入语义：
-- **agent 文件**：一律覆盖。内容完全由 role 决定（frontmatter `model` 是角色别名，真模型在 config.yml 解析），不含用户手改价值；`--force` 不影响它
-- **config.yml**：不存在→新建；已存在+不带 `--force`→**增量合并**（保留非 `modelRoles` 段如 `task`/`settings`，只替换 `modelRoles` 段，并剥离上次生成的注释头防重复堆积）；已存在+`--force`→整文件覆盖（会丢失非 `modelRoles` 段，有告警）
+写入语义（默认**不覆盖用户配置**）：
+- **config.yml**：不存在→新建；已存在+不带 `--force`→**按配置键增量合并**——只改写脚本管理的 4 个阶段键，`advisor` 的已填值、自定义 `modelRoles` 键、段内用户注释、其他顶层段（`settings`/`task` 等）全部原样保留；上次生成的注释头/尾部说明会被剥离再重写，重复运行不堆积。`--role` 局部刷新只更新选中阶段的键，**不会删掉其他阶段**。已存在+`--force`→整文件覆盖（会丢失自定义段，note 中显式告警）
+- **agent 文件**：只改写脚本管理的 frontmatter 键（`name`/`description`/`tools`/`spawns`/`model`）与正文；用户添加的其他 frontmatter 键（如按 §异构模型盲审配置 加的 `advisor: true`）原样保留。`--force` 不影响它
+
+> 想长期改模型值，推荐改 `omp.json` 的 `models.<phase>.id` 后重新 provision（幂等）；直接手改 config.yml 的受管键会在下次 provision 时被覆盖。
 
 生成产物：
 
-1. `config.yml` — `modelRoles` 段（`sage_reviewer`/`sage_coder`/`sage_closer`/`advisor`）；模型值来自 omp.json `models.<phase>.id`，未配置时写占位符并告警
-2. `agents/sage_reviewer.md` — plan-review + code-review 用（`model: "@sage_reviewer"`）
+1. `config.yml` — `modelRoles` 段（`sage_plan_reviewer`/`sage_coder`/`sage_code_reviewer`/`sage_closer`/`advisor`）；模型值来自 omp.json `models.<phase>.id`，未配置时写占位符并告警
+2. `agents/sage_plan_reviewer.md` — plan-review 用（`model: "@sage_plan_reviewer"`）
 3. `agents/sage_coder.md` — dev 用（`model: "@sage_coder"`）
-4. `agents/sage_closer.md` — close 用（`model: "@sage_closer"`）
+4. `agents/sage_code_reviewer.md` — code-review 用（`model: "@sage_code_reviewer"`）
+5. `agents/sage_closer.md` — close 用（`model: "@sage_closer"`）
 
 生成后：
 - 如 omp.json 中某阶段 `models.id` 为 null，config.yml 对应阶段角色为占位符 `<provider/model>`；请在 omp.json 填入实际模型标识符后重新 provision，或直接编辑 config.yml 替换。
-- 确认 `agents/sage-*.md` 位于 `<repo>/.omp/agents/` 或 `~/.omp/agent/agents/` 下——OMP 从该目录发现自定义 agent（项目优先于用户级与内置，first-wins 按 name 去重）。
-- 重启/刷新 OMP，在 `/agents` 面板确认 `sage_reviewer`/`sage_coder`/`sage_closer` 可见，在 `/model` 的 Roles 视图确认同名角色。
-- 旧版（T-023 每阶段独立 4 agent）部署残留的 `sage-plan-review.md`/`sage-dev.md`/`sage-code-review.md`/`sage-close.md` 为孤儿文件，建议清理 `agents/` 目录后重新 provision。
+- 确认 `agents/sage_*.md` 位于 `<repo>/.omp/agents/` 或 `~/.omp/agent/agents/` 下——OMP 从该目录发现自定义 agent（项目优先于用户级与内置，first-wins 按 name 去重）。
+- 重启/刷新 OMP，在 `/agents` 面板确认 `sage_plan_reviewer`/`sage_coder`/`sage_code_reviewer`/`sage_closer` 可见，在 `/model` 的 Roles 视图确认同名角色。
+- 旧版（T-025 三角色 / T-023 每阶段独立 4 agent）部署残留的 `sage_reviewer.md`、`sage-plan-review.md`、`sage-dev.md`、`sage-code-review.md`、`sage-close.md` 为孤儿文件，建议清理 `agents/` 目录后重新 provision。
 - provision 不写出工作区外配置（`--user` 显式指定除外）；注册是否生效以宿主实际派发结果为准。
 
 ## 失败恢复

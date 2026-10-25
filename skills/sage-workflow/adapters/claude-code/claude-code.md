@@ -11,7 +11,7 @@
 ## 自动派发
 
 1. L1 及以上进入 reviewer/coder/closer 阶段前，运行项目本地 `scripts/sage_dispatch.py prepare`；尚未 bootstrap 时运行 Skill 内置 `core/scripts/dispatch_phase.py prepare`。
-2. `claude-code.json` 将四个阶段映射为 `sage-reviewer`、`sage-coder`、`sage-reviewer`、`sage-closer`（项目内 Markdown agents 注册）。当 `prepare` 返回 `action=spawn_subagent` 时，Main Agent 必须立即调用 Claude Code 当前可用的原生 subagent 能力，并只传信封中的 `prompt`。
+2. `claude-code.json` 将四个阶段映射为 `sage-plan-reviewer`、`sage-coder`、`sage-code-reviewer`、`sage-closer`（项目内 Markdown agents 注册，每阶段独立文件，因此可在各自 frontmatter 配不同模型）。当 `prepare` 返回 `action=spawn_subagent` 时，Main Agent 必须立即调用 Claude Code 当前可用的原生 subagent 能力，并只传信封中的 `prompt`。
 3. subagent 完成后运行 `verify --receipt <path>`；只有 TASK 对应章节和 Git 状态出现有效产出才算成功。
 4. `status` 读取协议状态；`cancel` 只标记 `host_cancel_required`，Main Agent 仍须调用宿主原生取消/关闭能力。
 
@@ -38,7 +38,7 @@ uv run python docs/guides/execution-adapters/claude-code/provision.py --user
 uv run python scripts/sage_dispatch.py provision --repo-root D:\repo --adapter claude-code
 ```
 
-生成后必须重启/刷新宿主，并用最小派发探针验证注册生效；注册是否可用以宿主实际派发结果为准。
+生成后必须重启/刷新宿主，并用最小派发探针验证注册生效；注册是否可用以宿主实际派发结果为准。两个审查阶段是独立文件（`sage-plan-reviewer.md` / `sage-code-reviewer.md`），需要不同模型时在各自 frontmatter 补 `model:`，想用同一模型就写相同的值。
 
 ## 失败恢复
 

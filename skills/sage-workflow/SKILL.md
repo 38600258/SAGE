@@ -48,13 +48,13 @@ uv run python <skill-root>/core/scripts/dispatch_phase.py provision --adapter co
 ```
 > 命令执行口径：默认推荐 `uv run python`（uv 自动优先使用项目虚拟环境）；无 uv 环境时，优先运行项目虚拟环境中的 python（例如 `.venv`），没有项目虚拟环境再使用系统 python——下同，全文命令示例均按此口径执行。
 
-- Codex 等原生宿主：`prepare` 输出 `spawn_subagent`、`sage_reviewer`/`sage_coder`/`sage_closer` 和最小上下文；Main Agent 必须用当前宿主的原生派发工具执行，不能只把信封打印给用户。
+- Codex 等原生宿主：`prepare` 输出 `spawn_subagent`、`sage_plan_reviewer`/`sage_coder`/`sage_code_reviewer`/`sage_closer` 和最小上下文；Main Agent 必须用当前宿主的原生派发工具执行，不能只把信封打印给用户。
 - CLI 宿主：命令必须是 JSON 字符串数组，禁止 shell 拼接；CLI 输出只作为日志，成功必须由 `verify` 根据 TASK/Git 回执判定。
 - 从已声明支持原生 subagent 的 adapter 切换 CLI 时，必须提供 `--fallback-reason` 和 `--fallback-authorized`，避免静默降级。
 - 宿主无命名注册但有通用子代理能力时，adapter 可声明 `injected_subagent`；`prepare --channel injected` 生成的信封带 `injection` 隔离字段，派发前必须人工授权并记录隔离等级。通道优先级为 subagent > injected > cli；独立审查通道累计失败 ≥3 次触发熔断，合法出口为人类接管、人工授权降级审查或任务挂起。
 - `doctor` 在 Init 前探测各通道可用性并给出推荐通道；`provision` 生成宿主 agent 注册文件（Codex TOML 或项目内 Markdown agents），注册生效以宿主实际派发为准。
 - `cancel` 对原生宿主只记录 `host_cancel_required`，实际取消由宿主 API 完成；脚本不能假装拥有宿主进程控制权。
-- 模型配置位于 adapter 的 `models.<phase>`；`prepare --model <id>` 只覆盖声明为 `request` 或 CLI 参数型的通道，注册型 agent 必须同步宿主配置。
+- 模型配置位于 adapter 的 `models.<phase>`，逐阶段独立——两个审查阶段可以配不同模型，想用同一模型时两处填相同 id；`prepare --model <id>` 只覆盖声明为 `request` 或 CLI 参数型的通道，注册型 agent 必须同步宿主配置。
 - CLI 使用模型时，命令数组必须包含 `{model}`；模型不会写入角色 prompt，也不能依赖 prompt 中的模型占位符。
 
 ## 内置核心

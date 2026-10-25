@@ -6,9 +6,9 @@
     "supported": true,
     "invoker": "host",
     "agent_types": {
-      "plan-review": "sage-reviewer",
+      "plan-review": "sage-plan-reviewer",
       "dev": "sage-coder",
-      "code-review": "sage-reviewer",
+      "code-review": "sage-code-reviewer",
       "close": "sage-closer"
     }
   },

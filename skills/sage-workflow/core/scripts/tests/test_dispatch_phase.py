@@ -425,11 +425,13 @@ task.write_text(content, encoding='utf-8')
         )
         payload = json.loads(completed.stdout)
         self.assertEqual(payload["adapter"], "claude-code")
-        self.assertEqual([item["status"] for item in payload["results"]], ["written", "written", "written"])
-        reviewer = (target / "sage-reviewer.md").read_text(encoding="utf-8")
-        self.assertIn("name: sage-reviewer", reviewer)
+        self.assertEqual([item["status"] for item in payload["results"]], ["written"] * 4)
+        reviewer = (target / "sage-plan-reviewer.md").read_text(encoding="utf-8")
+        self.assertIn("name: sage-plan-reviewer", reviewer)
         self.assertIn("tools: Read, Write, Edit, Grep, Glob, Bash", reviewer)
         self.assertIn("ROLE_PROMPT", reviewer)
+        code_reviewer = (target / "sage-code-reviewer.md").read_text(encoding="utf-8")
+        self.assertIn("name: sage-code-reviewer", code_reviewer)
         coder = (target / "sage-coder.md").read_text(encoding="utf-8")
         self.assertIn("name: sage-coder", coder)
         self.assertIn("SAGE coder 子代理", coder)
@@ -514,12 +516,13 @@ task.write_text(content, encoding='utf-8')
             "json",
         )
         payload = json.loads(completed.stdout)
-        self.assertEqual([item["role"] for item in payload["results"]], ["coder"])
+        self.assertEqual([item["role"] for item in payload["results"]], ["dev"])
         self.assertTrue((target / "sage-coder.md").is_file())
-        self.assertFalse((target / "sage-reviewer.md").exists())
+        self.assertFalse((target / "sage-plan-reviewer.md").exists())
+        self.assertFalse((target / "sage-code-reviewer.md").exists())
 
     def test_provision_omp_generates_agents_and_config_skips_existing(self) -> None:
-        """OMP provision 生成 .omp/ 三件套（config.yml + 三角色 agent .md）；agent 一律覆盖，config.yml 增量合并不重复注释头。"""
+        """OMP provision 生成 config.yml + 四阶段 agent .md；agent 一律覆盖，config.yml 增量合并不重复注释头。"""
         target = Path(self.temp_dir.name) / "omp-config"
         completed = self.dispatch(
             "provision",
@@ -536,22 +539,27 @@ task.write_text(content, encoding='utf-8')
         self.assertEqual(
             statuses,
             {
-                "agent:reviewer": "written",
-                "agent:coder": "written",
-                "agent:closer": "written",
+                "agent:plan-review": "written",
+                "agent:dev": "written",
+                "agent:code-review": "written",
+                "agent:close": "written",
                 "config:modelroles": "written",
             },
         )
         self.assertTrue((target / "config.yml").is_file())
-        for name in ("sage_reviewer", "sage_coder", "sage_closer"):
+        for name in ("sage_plan_reviewer", "sage_coder", "sage_code_reviewer", "sage_closer"):
             self.assertTrue((target / "agents" / f"{name}.md").is_file())
         config = (target / "config.yml").read_text(encoding="utf-8")
         self.assertIn("modelRoles:", config)
-        for alias in ("sage_reviewer", "sage_coder", "sage_closer"):
+        for alias in ("sage_plan_reviewer", "sage_coder", "sage_code_reviewer", "sage_closer"):
             self.assertEqual(len(re.findall(rf"^\s+{alias}:", config, re.MULTILINE)), 1)
-        reviewer = (target / "agents" / "sage_reviewer.md").read_text(encoding="utf-8")
-        self.assertIn("name: sage_reviewer", reviewer)
-        self.assertIn('model: "@sage_reviewer"', reviewer)
+        for phase, alias in (
+            ("plan-review", "sage_plan_reviewer"),
+            ("code-review", "sage_code_reviewer"),
+        ):
+            agent_md = (target / "agents" / f"{alias}.md").read_text(encoding="utf-8")
+            self.assertIn(f"name: {alias}", agent_md)
+            self.assertIn(f'model: "@{alias}"', agent_md)
         coder = (target / "agents" / "sage_coder.md").read_text(encoding="utf-8")
         self.assertIn('model: "@sage_coder"', coder)
         closer = (target / "agents" / "sage_closer.md").read_text(encoding="utf-8")
@@ -587,8 +595,8 @@ task.write_text(content, encoding='utf-8')
         statuses = {item["role"]: item["status"] for item in payload["results"]}
         self.assertTrue(all(s == "written" for s in statuses.values()), statuses)
 
-    def test_provision_omp_role_filter_generates_single_reviewer(self) -> None:
-        """OMP provision --role reviewer 只生成 1 个 sage_reviewer（审查合并），config.yml 只含 reviewer 键。"""
+    def test_provision_omp_role_filter_generates_two_review_agents(self) -> None:
+        """OMP provision --role reviewer 生成 plan-review + code-review 两个独立 agent，config.yml 只含这两个键。"""
         target = Path(self.temp_dir.name) / "omp-role-filter"
         completed = self.dispatch(
             "provision",
@@ -606,24 +614,26 @@ task.write_text(content, encoding='utf-8')
         self.assertEqual(
             statuses,
             {
-                "agent:reviewer": "written",
+                "agent:plan-review": "written",
+                "agent:code-review": "written",
                 "config:modelroles": "written",
             },
         )
-        # reviewer 角色生成 1 个 sage_reviewer，不生成 coder/closer
-        self.assertTrue((target / "agents" / "sage_reviewer.md").is_file())
+        # reviewer 角色生成两个独立审查 agent，不生成 coder/closer
+        self.assertTrue((target / "agents" / "sage_plan_reviewer.md").is_file())
+        self.assertTrue((target / "agents" / "sage_code_reviewer.md").is_file())
         self.assertFalse((target / "agents" / "sage_coder.md").exists())
         self.assertFalse((target / "agents" / "sage_closer.md").exists())
-        # config.yml 只含 reviewer 键，不含 coder/closer
+        # config.yml 只含两个审查键，不含 coder/closer
         config = (target / "config.yml").read_text(encoding="utf-8")
-        self.assertIn("sage_reviewer:", config)
+        self.assertIn("sage_plan_reviewer:", config)
+        self.assertIn("sage_code_reviewer:", config)
         self.assertNotIn("sage_coder:", config)
         self.assertNotIn("sage_closer:", config)
 
-    def test_provision_omp_each_role_model_written_independently(self) -> None:
-        """OMP provision：三角色模型独立写入 config.yml；reviewer 取 plan-review 首个非空、code-review 不一致告警。"""
+    def test_provision_omp_review_phases_accept_distinct_models(self) -> None:
+        """OMP provision：两个审查阶段各写各的模型，允许不同；同模型时两处写相同值即可。"""
         target = Path(self.temp_dir.name) / "omp-models"
-        # 篡改 omp.json：plan-review 与 code-review 填不同模型，验证 reviewer 取 plan-review 值并告警
         omp_json = SKILL_ROOT / "adapters" / "omp" / "omp.json"
         original = omp_json.read_text(encoding="utf-8")
         try:
@@ -645,15 +655,15 @@ task.write_text(content, encoding='utf-8')
         finally:
             omp_json.write_text(original, encoding="utf-8")
         payload = json.loads(completed.stdout)
-        # config.yml：sage_reviewer 取 plan-review 值；sage_coder/sage_closer 独立写入
         config = (target / "config.yml").read_text(encoding="utf-8")
-        self.assertIn("sage_reviewer: anthropic/claude-sonnet-4-5", config)
+        # 四阶段各自独立写入，两个审查阶段模型不同也照写
+        self.assertIn("sage_plan_reviewer: anthropic/claude-sonnet-4-5", config)
+        self.assertIn("sage_code_reviewer: openai/gpt-5.6", config)
         self.assertIn("sage_coder: litellm/deepseek-v4-flash", config)
         self.assertIn("sage_closer: litellm/sensenova-6.8-flash-lite", config)
-        # 各阶段不一致 → 告警
+        # 不再有跨阶段一致性告警
         all_notes = " ".join((item.get("note") or "") for item in payload["results"])
-        self.assertIn("各阶段默认模型不一致", all_notes)
-        # JSON 结构断言（AC-1 要求）
+        self.assertNotIn("各阶段默认模型不一致", all_notes)
         self.assertEqual(payload["adapter"], "omp")
         self.assertEqual(payload["target_dir"], str(target.resolve()))
         self.assertIn("omp.json", payload["models_source"])
@@ -661,8 +671,57 @@ task.write_text(content, encoding='utf-8')
         self.assertGreaterEqual(len(payload["post_steps"]), 3)
         self.assertEqual(
             [item["role"] for item in payload["results"]],
-            ["agent:reviewer", "agent:coder", "agent:closer", "config:modelroles"],
+            ["agent:plan-review", "agent:dev", "agent:code-review", "agent:close", "config:modelroles"],
         )
+
+    def test_provision_omp_preserves_user_config_and_frontmatter(self) -> None:
+        """OMP provision 增量合并只改脚本管理的键：用户 advisor 值、自定义 modelRoles 键、其他顶层段、
+        agent frontmatter 用户键全部保留；重复运行不堆积注释；--role 局部刷新不删其他阶段键。"""
+        target = Path(self.temp_dir.name) / "omp-user-config"
+        (target / "agents").mkdir(parents=True)
+        (target / "config.yml").write_text(
+            "# 用户自定义配置\n"
+            "settings:\n"
+            "  theme: dark\n"
+            "modelRoles:\n"
+            "  sage_plan_reviewer: user/my-plan-reviewer\n"
+            "  advisor: user/third-vendor-model\n"
+            "  my_custom_role: user/custom-model\n"
+            "task:\n"
+            "  max_parallel: 3\n",
+            encoding="utf-8",
+        )
+        (target / "agents" / "sage_plan_reviewer.md").write_text(
+            "---\nname: sage_plan_reviewer\nmodel: \"@sage_plan_reviewer\"\nadvisor: true\n---\n\n用户正文\n",
+            encoding="utf-8",
+        )
+        for _ in range(3):
+            completed = self.dispatch(
+                "provision", "--adapter", "omp", "--target-dir", str(target), "--format", "json"
+            )
+        payload = json.loads(completed.stdout)
+        config = (target / "config.yml").read_text(encoding="utf-8")
+        # 用户内容全部保留
+        self.assertIn("theme: dark", config)
+        self.assertIn("max_parallel: 3", config)
+        self.assertIn("advisor: user/third-vendor-model", config)
+        self.assertIn("my_custom_role: user/custom-model", config)
+        # 脚本管理的键已刷新（覆盖用户旧值），且注释头不堆积
+        self.assertIn("sage_plan_reviewer: litellm/glm-5.2", config)
+        self.assertEqual(config.count("OMP modelRoles 配置"), 1, config)
+        # agent frontmatter 用户键保留，受管键刷新
+        reviewer = (target / "agents" / "sage_plan_reviewer.md").read_text(encoding="utf-8")
+        self.assertIn("advisor: true", reviewer)
+        self.assertIn('model: "@sage_plan_reviewer"', reviewer)
+        notes = " ".join((item.get("note") or "") for item in payload["results"])
+        self.assertIn("保留", notes)
+
+        # --role coder 局部刷新不得删掉其他阶段的键
+        self.dispatch("provision", "--adapter", "omp", "--target-dir", str(target), "--role", "coder", "--format", "json")
+        config = (target / "config.yml").read_text(encoding="utf-8")
+        for alias in ("sage_plan_reviewer", "sage_coder", "sage_code_reviewer", "sage_closer"):
+            self.assertIn(f"{alias}:", config)
+        self.assertIn("my_custom_role: user/custom-model", config)
 
     def test_provision_omp_user_deploys_to_home_agent_dir(self) -> None:
         """OMP provision --user 部署到宿主用户注册目录（~/.omp/agent）；与 --target-dir 互斥报错。"""
@@ -678,7 +737,8 @@ task.write_text(content, encoding='utf-8')
         expected_target = (fake_home / ".omp" / "agent").resolve()
         self.assertEqual(Path(payload["target_dir"]).resolve(), expected_target)
         self.assertTrue((expected_target / "config.yml").is_file())
-        self.assertTrue((expected_target / "agents" / "sage_reviewer.md").is_file())
+        self.assertTrue((expected_target / "agents" / "sage_plan_reviewer.md").is_file())
+        self.assertTrue((expected_target / "agents" / "sage_code_reviewer.md").is_file())
         # 互斥：--user 与 --target-dir 同传报错
         completed = self.run_process(
             [sys.executable, str(omp_provision), "--user", "--target-dir", str(self.repo_root), "--format", "json"],
@@ -701,7 +761,8 @@ task.write_text(content, encoding='utf-8')
         payload = json.loads(completed.stdout)
         expected_project = (cwd_dir / ".codex" / "agents").resolve()
         self.assertEqual(Path(payload["target_dir"]).resolve(), expected_project)
-        self.assertTrue((expected_project / "sage_reviewer.toml").is_file())
+        self.assertTrue((expected_project / "sage_plan_reviewer.toml").is_file())
+        self.assertTrue((expected_project / "sage_code_reviewer.toml").is_file())
         self.assertTrue((expected_project / "sage_coder.toml").is_file())
         self.assertTrue((expected_project / "sage_closer.toml").is_file())
         # --user：写入 ~/.codex/agents（临时 USERPROFILE）
@@ -714,7 +775,7 @@ task.write_text(content, encoding='utf-8')
         payload = json.loads(completed.stdout)
         expected_user = (fake_home / ".codex" / "agents").resolve()
         self.assertEqual(Path(payload["target_dir"]).resolve(), expected_user)
-        self.assertTrue((expected_user / "sage_reviewer.toml").is_file())
+        self.assertTrue((expected_user / "sage_plan_reviewer.toml").is_file())
         # 互斥：--user 与 --target-dir 同传报错
         completed = self.run_process(
             [sys.executable, str(codex_provision), "--user", "--target-dir", str(cwd_dir), "--format", "json"],
@@ -735,10 +796,11 @@ task.write_text(content, encoding='utf-8')
             "--format",
             "json",
         )
-        reviewer = (target / "sage_reviewer.toml").read_text(encoding="utf-8")
-        self.assertIn('model = "gpt-5.6-sol"', reviewer)
-        self.assertIn('model_provider = "codex_shim"', reviewer)
-        self.assertIn('sandbox_mode = "workspace-write"', reviewer)
+        for phase_file in ("sage_plan_reviewer.toml", "sage_code_reviewer.toml"):
+            reviewer = (target / phase_file).read_text(encoding="utf-8")
+            self.assertIn('model = "gpt-5.6-sol"', reviewer)
+            self.assertIn('model_provider = "codex_shim"', reviewer)
+            self.assertIn('sandbox_mode = "workspace-write"', reviewer)
         coder = (target / "sage_coder.toml").read_text(encoding="utf-8")
         self.assertIn('model = "gpt-5.6-terra"', coder)
         self.assertIn('sandbox_mode = "workspace-write"', coder)
@@ -754,7 +816,7 @@ task.write_text(content, encoding='utf-8')
             "json",
         )
         payload = json.loads(completed.stdout)
-        self.assertEqual([item["status"] for item in payload["results"]], ["skipped", "skipped", "skipped"])
+        self.assertEqual([item["status"] for item in payload["results"]], ["skipped"] * 4)
 
         # --force 覆盖已存在注册文件
         completed = self.dispatch(
@@ -768,7 +830,7 @@ task.write_text(content, encoding='utf-8')
             "json",
         )
         payload = json.loads(completed.stdout)
-        self.assertEqual([item["status"] for item in payload["results"]], ["written", "written", "written"])
+        self.assertEqual([item["status"] for item in payload["results"]], ["written"] * 4)
 
     def test_provision_codex_reports_drift_when_model_source_changed(self) -> None:
         """codex 注册文件的 model 与 adapter JSON 不一致时报 drift，不静默跳过。"""
@@ -783,9 +845,10 @@ task.write_text(content, encoding='utf-8')
         completed = self.dispatch("provision", "--adapter", "codex", "--target-dir", str(target), "--format", "json")
         payload = json.loads(completed.stdout)
         statuses = {item["role"]: item["status"] for item in payload["results"]}
-        self.assertEqual(statuses["coder"], "drift", statuses)
-        self.assertEqual(statuses["reviewer"], "skipped", statuses)
-        self.assertIn("stale-model", next(i["note"] for i in payload["results"] if i["role"] == "coder"))
+        self.assertEqual(statuses["dev"], "drift", statuses)
+        self.assertEqual(statuses["plan-review"], "skipped", statuses)
+        self.assertEqual(statuses["code-review"], "skipped", statuses)
+        self.assertIn("stale-model", next(i["note"] for i in payload["results"] if i["role"] == "dev"))
 
     def test_provision_codex_passes_model_provider(self) -> None:
         target = Path(self.temp_dir.name) / "codex-provider"
@@ -800,7 +863,7 @@ task.write_text(content, encoding='utf-8')
             "--format",
             "json",
         )
-        reviewer = (target / "sage_reviewer.toml").read_text(encoding="utf-8")
+        reviewer = (target / "sage_plan_reviewer.toml").read_text(encoding="utf-8")
         self.assertIn('model_provider = "custom_shim"', reviewer)
 
 

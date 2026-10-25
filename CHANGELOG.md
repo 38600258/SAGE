@@ -3,6 +3,13 @@
 > 只增不改。按版本号组织。遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 格式。
 > 注：历史条目原本只记录日期，迁移到单行标题格式时用 `00:00:00` 作为回溯补齐时间。
 
+## [1.8.8] 🐛 BugFix 审查两阶段拆为独立 agent，允许 plan-review 与 code-review 使用不同模型 (L0) - 2026-10-25 00:00:00
+- 动机：用户实测发现两个审查阶段无法使用不同模型——T-025 把 plan-review/code-review 合并成同一个注册型 agent（omp `sage_reviewer`、codex `sage_reviewer.toml`、claude-code `sage-reviewer.md`），注册文件只有一个模型槽位，`role_model_id` 只能「取 plan-review 首个非空 + 告警」。更糟的是 `prepare` 信封仍按阶段上报不同模型，造成信封声明与实际执行模型静默分叉，审计不可信。
+- 修复内容：①三个适配器 `provision.py` 改为阶段驱动（`PHASE_ROLE` / `PHASE_AGENT_NAME`），plan-review 与 code-review 各生成独立注册文件与独立 modelRoles 键（omp `sage_plan_reviewer`/`sage_code_reviewer`、codex 同名 TOML、claude-code `sage-plan-reviewer`/`sage-code-reviewer`）；`phase_model_id()` 只读本阶段 `models.<phase>.id`，删除跨阶段一致性告警与「取首个非空」逻辑。②`--role reviewer` 现在生成两个审查 agent（角色过滤改为阶段过滤），coder/closer 行为不变。③四个 adapter JSON（omp/codex/claude-code/generic-tool）的 `agent_types` 同步拆分。④文档同步 omp.md/codex.md/claude-code.md/SKILL.md/model-selection.md/execution-channels.md/CODE_WIKI.md：明确「两个审查阶段可各配不同模型；想用同一模型时两处填相同 id」。
+- 验证：全量单测 112 例 OK（改写 7 个断言旧单 reviewer 语义的用例，含新增 `test_provision_omp_review_phases_accept_distinct_models` 断言两阶段写入不同模型且无一致性告警）；构造 bootstrap 布局实测三适配器：provision 产物中 `sage_plan_reviewer: vendorA/plan-model` 与 `sage_code_reviewer: vendorB/code-model` 并存，`prepare` 对 plan-review/code-review 分别给出 `agent_type=sage_plan_reviewer/sage_code_reviewer` 与对应模型，信封与注册文件一致。
+- 说明：按用户明确要求以 L0 直接修改落地（不走 L1+ 流程，未创建 TASK 文档）。
+- 追加修复（同一版本，用户复核提出）：provision 覆盖用户配置。①`merge_config_yml` 原本整段替换 `modelRoles`，导致用户手填的 `advisor` 真实值被打回占位符、自定义 `modelRoles` 键被删；②agent 文件无条件整文件覆盖，用户按 omp.md 加在 frontmatter 的 `advisor: true` 被抹掉；③`--role coder` 局部刷新会把其他 3 个阶段键一并删除。改为：config.yml 按配置键合并（只改写脚本管理的 4 个阶段键，advisor 已填值/自定义键/段内注释/其他顶层段全保留，受管键按阶段顺序重排、未选中阶段保留原值，注释头剥离后重写故幂等）；agent 文件只改写受管 frontmatter 键（name/description/tools/spawns/model）与正文，用户其他键保留。实测：用户 settings/task 段 + advisor 真实值 + 自定义键 + advisor:true 全部存活，连续 4 次运行行数恒定 21、注释头恒为 1 份；`--role coder` 后 4 个阶段键仍齐全。单测 113 例 OK（新增 test_provision_omp_preserves_user_config_and_frontmatter）。
+
 
 ## [1.8.7] 🐛 BugFix provision 三适配器统一默认项目目录、修复注释堆积与 codex 双源漂移 (T-001) - 2026-10-25 00:00:00
 - 动机：用户在 arrow3D 引入 SAGE 后实测 `omp/provision.py` 改模型，发现四个问题：①不带 `--force` 时 `merge_config_yml` 把生成块的注释头当成「非 modelRoles 段」保留，每次运行再拼一份——实测连续裸跑 5 次，`config.yml` 从 12 行涨到 24 行、注释头重复 4 份；②`--target-dir` 缺省用 `Path.cwd()`，从任意目录裸跑就写到错误位置（`omp.json` 明明在脚本同目录，却与目标目录不同源）；③agent 文件已存在时默认 skipped，而该文件内容 100% 由 role 决定、不含用户手改价值，保护无意义；④codex 把模型写进 TOML 本体，与 `codex.json` 的 `models.<phase>.id` 形成双真相源，改了 JSON 却静默跳过会让用户以为已生效。

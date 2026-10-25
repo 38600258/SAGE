@@ -16,25 +16,34 @@ from typing import Any
 
 
 PROVISION_ROLES = ("reviewer", "coder", "closer")
-ROLE_PHASES = {
-    "reviewer": ("plan-review", "code-review"),
-    "coder": ("dev",),
-    "closer": ("close",),
+
+# 阶段 → 角色（--role 过滤与角色正文复用）
+PHASE_ROLE = {
+    "plan-review": "reviewer",
+    "dev": "coder",
+    "code-review": "reviewer",
+    "close": "closer",
+}
+
+# 阶段 → 注册 agent 名（与 codex.json agent_types 值一致；每阶段独立注册文件，可配不同模型）
+PHASE_AGENT_NAME = {
+    "plan-review": "sage_plan_reviewer",
+    "dev": "sage_coder",
+    "code-review": "sage_code_reviewer",
+    "close": "sage_closer",
 }
 
 
-def role_model_id(role: str, models: dict[str, Any]) -> tuple[str | None, str | None]:
-    """返回角色的期望模型标识符与告警：审查角色取 plan-review 首个非空，与 code-review 不一致时告警。"""
-    phases = ROLE_PHASES[role]
-    ids = [models.get(phase, {}).get("id") or None for phase in phases]
-    model_id = next((item for item in ids if item), None)
-    distinct = {item for item in ids if item}
-    warning = None
-    if len(distinct) > 1:
-        warning = f"{role} 各阶段默认模型不一致：{sorted(distinct)}；已采用 {model_id}"
+def phase_model_id(phase: str, models: dict[str, Any]) -> tuple[str | None, str | None]:
+    """返回该阶段的模型标识符与告警：只读本阶段 models.<phase>.id，不做跨阶段一致性约束。
+
+    两个审查阶段各有独立注册文件，因此可以配不同模型；需要同一模型时在
+    plan-review 与 code-review 两处填相同 id 即可。
+    """
+    model_id = models.get(phase, {}).get("id") or None
     if not model_id:
-        warning = f"未解析到 {role} 默认模型；请替换 model 字段后再注册"
-    return model_id, warning
+        return None, f"未解析到 {phase} 阶段模型；请替换 model 字段后再注册"
+    return model_id, None
 
 
 # 写入注册文件的角色级指令：与派发信封的角色契约互补，只约束执行载体层行为
@@ -74,7 +83,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-dir", type=Path, default=None, help="宿主注册目录（项目 .codex/agents 或用户 ~/.codex/agents）；不指定时，bootstrap 布局下默认 <脚本所在项目根>/.codex/agents，否则 <当前目录>/.codex/agents")
     parser.add_argument("--user", action="store_true", help="部署到宿主用户注册目录（~/.codex/agents），而非项目目录；与 --target-dir 互斥")
     parser.add_argument("--model-provider", help="TOML 模板的 model_provider，默认 codex_shim")
-    parser.add_argument("--role", choices=PROVISION_ROLES, help="只生成指定角色；缺省生成全部")
+    parser.add_argument("--role", choices=PROVISION_ROLES, help="只生成指定角色（reviewer 生成 plan-review + code-review 两个 TOML）；缺省生成全部")
     parser.add_argument("--force", action="store_true", help="覆盖已存在的注册文件")
     parser.add_argument("--format", choices=("text", "json"), default="text")
     args = parser.parse_args()
@@ -101,10 +110,10 @@ def load_models() -> tuple[dict[str, Any], str]:
     return (models if isinstance(models, dict) else {}), str(candidate)
 
 
-def build_toml_agent(role: str, models: dict[str, Any], provider: str) -> tuple[str, str | None]:
-    """生成单个角色的 TOML 注册内容；各阶段模型不一致或缺失时返回人工处理警示。"""
-    phases = ROLE_PHASES[role]
-    model_id, warning = role_model_id(role, models)
+def build_toml_agent(phase: str, models: dict[str, Any], provider: str) -> tuple[str, str | None]:
+    """生成单个阶段的 TOML 注册内容；本阶段模型缺失时写占位符并由 provision 告警。"""
+    role = PHASE_ROLE[phase]
+    model_id, _ = phase_model_id(phase, models)
     if not model_id:
         model_id = "REPLACE_WITH_MODEL_ID"
     sandbox = "workspace-write"
@@ -115,15 +124,15 @@ def build_toml_agent(role: str, models: dict[str, Any], provider: str) -> tuple[
             "写权限已由 developer_instructions 限定为仅 TASK 文档。"
         )
     content = (
-        f'name = "sage_{role}"\n'
-        f'description = "SAGE {role} subagent for SAGE workflow phases: {", ".join(phases)}."\n'
+        f'name = "{PHASE_AGENT_NAME[phase]}"\n'
+        f'description = "SAGE {role} subagent for SAGE workflow phase: {phase}."\n'
         "\n"
         f'model = "{model_id}"\n'
         f'model_provider = "{provider}"\n'
         f'sandbox_mode = "{sandbox}"\n'
         "\n"
         'developer_instructions = """\n'
-        f"你是 SAGE {role} 子代理。提供了 ROLE_PROMPT 路径时，遵循仓库的 {role} 角色契约。\n"
+        f"你是 SAGE {role} 子代理（阶段 {phase}）。提供了 ROLE_PROMPT 路径时，遵循仓库的 {role} 角色契约。\n"
         "从派发 prompt 中读取 REPO_ROOT、TASK_PATH、ROLE_PROMPT、PHASE；TASK 元数据是调度事实的唯一来源。\n"
         f"{ROLE_INSTRUCTIONS[role]}\n"
         + ("只允许写 TASK 文档（含 2.x/4.x 审查章节），不得改代码、改计划或触碰其他文件。\n" if role == "reviewer" else "")
@@ -140,39 +149,43 @@ def _registered_model(content: str) -> str | None:
 
 
 def provision(args: argparse.Namespace) -> dict[str, Any]:
-    """按角色循环生成 sage-<role>.toml；模型写进 TOML 本体，故注册文件与 adapter JSON 的
+    """按阶段循环生成 sage_<phase>.toml；模型写进 TOML 本体，故注册文件与 adapter JSON 的
     models.<phase>.id 是两个真相源：已存在且未 --force 时**不静默跳过**，而是比对两者，
     不一致则显式告警并要求 --force，避免改了 codex.json 却以为已生效的双源漂移。
     """
     target_dir = args.target_dir.resolve()
-    roles = [args.role] if args.role else list(PROVISION_ROLES)
+    if args.role:
+        phases = [phase for phase, role in PHASE_ROLE.items() if role == args.role]
+    else:
+        phases = list(PHASE_AGENT_NAME)
     models, models_source = load_models()
     provider = args.model_provider or "codex_shim"
 
     target_dir.mkdir(parents=True, exist_ok=True)
     results: list[dict[str, Any]] = []
-    for role in roles:
-        filename = f"sage_{role}.toml"
-        content, sandbox_note = build_toml_agent(role, models, provider)
+    for phase in phases:
+        filename = f"{PHASE_AGENT_NAME[phase]}.toml"
+        content, sandbox_note = build_toml_agent(phase, models, provider)
         target_path = target_dir / filename
-        expected_model, _ = role_model_id(role, models)
+        expected_model, _ = phase_model_id(phase, models)
         if target_path.exists() and not args.force:
             registered = _registered_model(target_path.read_text(encoding="utf-8"))
             if expected_model and registered and registered != expected_model:
                 results.append({
-                    "role": role,
+                    "role": phase,
                     "path": str(target_path),
                     "status": "drift",
                     "note": f"注册文件 model={registered}，adapter JSON 要求 {expected_model}；已跳过。加 --force 覆盖以同步",
                 })
                 continue
-            results.append({"role": role, "path": str(target_path), "status": "skipped", "note": "已存在且与 adapter JSON 一致；加 --force 可强制覆盖"})
+            results.append({"role": phase, "path": str(target_path), "status": "skipped", "note": "已存在且与 adapter JSON 一致；加 --force 可强制覆盖"})
             continue
         target_path.write_text(content, encoding="utf-8")
-        results.append({"role": role, "path": str(target_path), "status": "written", "note": sandbox_note})
+        results.append({"role": phase, "path": str(target_path), "status": "written", "note": sandbox_note})
     post_steps = [
         "重启或刷新宿主以加载新的 agent 注册；注册是否生效以宿主实际派发结果为准。",
         "注册型模型变更必须同步 adapter JSON（models.<phase>），避免双源漂移；检测到 drift 时加 --force 重新生成。",
+        "两个审查阶段是独立注册文件（sage_plan_reviewer / sage_code_reviewer），可各配不同模型；想用同一模型时在两处填相同 id。",
         f"目标目录为 {'~/.codex/agents（宿主用户注册目录，--user）' if args.user else '项目 .codex/agents（默认；随仓库版本管理）'}；用户目录为全局配置，请人工确认放置位置。",
     ]
     return {
