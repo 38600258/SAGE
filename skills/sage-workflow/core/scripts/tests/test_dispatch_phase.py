@@ -519,7 +519,7 @@ task.write_text(content, encoding='utf-8')
         self.assertFalse((target / "sage-reviewer.md").exists())
 
     def test_provision_omp_generates_agents_and_config_skips_existing(self) -> None:
-        """OMP provision 生成 .omp/ 三件套（config.yml + 三角色 agent .md），幂等不覆盖，--force 覆盖。"""
+        """OMP provision 生成 .omp/ 三件套（config.yml + 三角色 agent .md）；agent 一律覆盖，config.yml 增量合并不重复注释头。"""
         target = Path(self.temp_dir.name) / "omp-config"
         completed = self.dispatch(
             "provision",
@@ -567,10 +567,12 @@ task.write_text(content, encoding='utf-8')
         )
         payload = json.loads(completed.stdout)
         statuses = {item["role"]: item["status"] for item in payload["results"]}
-        # 不带 --force：agent 文件 skipped（幂等），config.yml 增量合并 written
+        # 不带 --force：agent 文件一律覆盖（内容由 role 决定，无手改价值），config.yml 增量合并
         agent_statuses = [v for k, v in statuses.items() if k.startswith("agent:")]
-        self.assertTrue(all(s == "skipped" for s in agent_statuses), agent_statuses)
+        self.assertTrue(all(s == "written" for s in agent_statuses), agent_statuses)
         self.assertEqual(statuses["config:modelroles"], "written", statuses)
+        # 注释头不随增量合并重复堆积
+        self.assertEqual(config.count("OMP modelRoles 配置（SAGE 适配器生成）"), 1, config)
         completed = self.dispatch(
             "provision",
             "--adapter",
@@ -722,7 +724,7 @@ task.write_text(content, encoding='utf-8')
         )
         self.assertIn("互斥", completed.stderr)
 
-    def test_provision_codex_toml_uses_adapter_models_and_skips_existing(self) -> None:
+    def test_provision_codex_toml_uses_adapter_models_and_detects_drift(self) -> None:
         target = Path(self.temp_dir.name) / "codex-agents"
         self.dispatch(
             "provision",
@@ -736,12 +738,12 @@ task.write_text(content, encoding='utf-8')
         reviewer = (target / "sage_reviewer.toml").read_text(encoding="utf-8")
         self.assertIn('model = "gpt-5.6-sol"', reviewer)
         self.assertIn('model_provider = "codex_shim"', reviewer)
-        self.assertIn('sandbox_mode = "read-only"', reviewer)
+        self.assertIn('sandbox_mode = "workspace-write"', reviewer)
         coder = (target / "sage_coder.toml").read_text(encoding="utf-8")
         self.assertIn('model = "gpt-5.6-terra"', coder)
         self.assertIn('sandbox_mode = "workspace-write"', coder)
 
-        # 未加 --force 时对已存在注册文件跳过（skips_existing 语义）
+        # 未加 --force：注册文件与 adapter JSON 一致时判定 skipped（不重复写入）
         completed = self.dispatch(
             "provision",
             "--adapter",
@@ -767,6 +769,23 @@ task.write_text(content, encoding='utf-8')
         )
         payload = json.loads(completed.stdout)
         self.assertEqual([item["status"] for item in payload["results"]], ["written", "written", "written"])
+
+    def test_provision_codex_reports_drift_when_model_source_changed(self) -> None:
+        """codex 注册文件的 model 与 adapter JSON 不一致时报 drift，不静默跳过。"""
+        target = Path(self.temp_dir.name) / "codex-drift"
+        self.dispatch("provision", "--adapter", "codex", "--target-dir", str(target), "--format", "json")
+        # 篡改已生成注册文件的 model，模拟 adapter JSON 已升级而注册文件未同步
+        registered = target / "sage_coder.toml"
+        registered.write_text(
+            registered.read_text(encoding="utf-8").replace('model = "gpt-5.6-terra"', 'model = "stale-model"'),
+            encoding="utf-8",
+        )
+        completed = self.dispatch("provision", "--adapter", "codex", "--target-dir", str(target), "--format", "json")
+        payload = json.loads(completed.stdout)
+        statuses = {item["role"]: item["status"] for item in payload["results"]}
+        self.assertEqual(statuses["coder"], "drift", statuses)
+        self.assertEqual(statuses["reviewer"], "skipped", statuses)
+        self.assertIn("stale-model", next(i["note"] for i in payload["results"] if i["role"] == "coder"))
 
     def test_provision_codex_passes_model_provider(self) -> None:
         target = Path(self.temp_dir.name) / "codex-provider"

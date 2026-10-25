@@ -89,7 +89,7 @@ uv run python scripts/sage_dispatch.py verify --receipt <receipt> --format json
 OMP 自定义 agent 需要配置文件才能被 `task` 工具派发。`provision` 生成 `.omp/` 目录（config.yml + 三角色 agent）：
 
 ```powershell
-# 不带参数：默认生成到 <当前目录>/.omp（项目目录），config.yml 增量合并（保留已有非 modelRoles 段）
+# 不带参数：默认生成到 <脚本所在项目根>/.omp（项目目录），config.yml 增量合并（保留已有非 modelRoles 段）
 uv run python docs/guides/execution-adapters/omp/provision.py
 
 # 指定目标目录
@@ -98,11 +98,11 @@ uv run python docs/guides/execution-adapters/omp/provision.py --target-dir D:\re
 # 部署到宿主用户注册目录（~/.omp/agent），与 --target-dir 互斥
 uv run python docs/guides/execution-adapters/omp/provision.py --user
 
-# --force：强制覆盖所有文件（config.yml 整文件覆盖，agent 文件覆盖）
+# --force：config.yml 整文件覆盖（会丢失非 modelRoles 自定义段，有告警）；不影响 agent 文件
 uv run python docs/guides/execution-adapters/omp/provision.py --force
 
 # 经主入口委托执行（bootstrap 后的项目内必须带 --repo-root）
-uv run python scripts/sage_dispatch.py provision --repo-root D:\repo --adapter omp --target-dir D:\repo\.omp
+uv run python scripts/sage_dispatch.py provision --repo-root D:\repo --adapter omp
 
 # 只生成 reviewer 角色（生成 1 个 sage_reviewer agent）
 uv run python docs/guides/execution-adapters/omp/provision.py --role reviewer
@@ -110,13 +110,13 @@ uv run python docs/guides/execution-adapters/omp/provision.py --role reviewer
 
 复制/部署方式（给 AI 看的一句话自动部署）：
 
-- **项目目录（默认）**：在仓库根运行 `provision.py`（不带参数），生成 `<repo>/.omp/`（config.yml + agents/sage_reviewer.md、sage_coder.md、sage_closer.md），随仓库版本管理。
+- **项目目录（默认）**：运行 `provision.py`（不带参数），生成 `<repo>/.omp/`（config.yml + agents/sage_reviewer.md、sage_coder.md、sage_closer.md），随仓库版本管理；从任意目录运行都定位到脚本所在仓库。
 - **用户目录（--user）**：运行 `provision.py --user`，生成 `~/.omp/agent/`（config.yml + agents/），全局配置、多项目共享，不污染仓库。
 - 手动复制：把项目生成的 `config.yml` 的 `modelRoles` 段合并到 `~/.omp/agent/config.yml`（全局）或 `<repo>/.omp/config.yml`（项目），把 `agents/*.md` 放到对应 `agents/` 目录。OMP 从该目录发现自定义 agent（项目优先于用户级与内置，first-wins 按 name 去重）。
 
 写入语义：
-- **agent 文件**：不存在→写入；已存在+不带 `--force`→跳过；已存在+`--force`→覆盖
-- **config.yml**：不存在→新建；已存在+不带 `--force`→**增量合并**（保留非 `modelRoles` 段如 `task`/`settings`，只替换 `modelRoles` 段）；已存在+`--force`→整文件覆盖（会丢失非 `modelRoles` 段，有告警）
+- **agent 文件**：一律覆盖。内容完全由 role 决定（frontmatter `model` 是角色别名，真模型在 config.yml 解析），不含用户手改价值；`--force` 不影响它
+- **config.yml**：不存在→新建；已存在+不带 `--force`→**增量合并**（保留非 `modelRoles` 段如 `task`/`settings`，只替换 `modelRoles` 段，并剥离上次生成的注释头防重复堆积）；已存在+`--force`→整文件覆盖（会丢失非 `modelRoles` 段，有告警）
 
 生成产物：
 

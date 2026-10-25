@@ -14,7 +14,7 @@ OMP 的模型路由机制（以官方源码 docs/task-agent-discovery.md 为准�
 为每阶段配置实际模型标识符；审查两阶段共用 `sage_reviewer` 键，模型取 plan-review 的
 首个非空值，若 code-review 与 plan-review 不一致则告警（对齐 codex build_toml_agent 语义）。
 
-本脚本生成（默认写入 <当前目录>/.omp 项目目录，--user 写入 ~/.omp/agent 用户目录）：
+本脚本生成（bootstrap 布局下默认写入 <脚本所在项目根>/.omp；--user 写入 ~/.omp/agent 用户目录）：
 1. `config.yml` —— modelRoles 段（sage_reviewer/sage_coder/sage_closer + advisor 固定键）
 2. `agents/sage_reviewer.md` —— 审查（plan-review + code-review）用
 3. `agents/sage_coder.md` —— dev 用
@@ -91,6 +91,30 @@ ROLE_BODY = {
 }
 
 
+# build_modelroles_block 生成的注释头。merge_config_yml 用它从保留段剥离上一次生成的
+# 注释，避免增量合并逐次重复堆积（2026-10-25 实测：裸跑一次 +4 行）。
+_GENERATED_HEADER_LINES = (
+    "# OMP modelRoles 配置（SAGE 适配器生成）",
+    "# 三角色独立键；审查（sage_reviewer）覆盖 plan-review+code-review 两阶段，模型值来自 omp.json models.<phase>.id。",
+    "# 跨模型异构盲审：将 plan-review/code-review 阶段的模型配为与 default（主会话模型）不同厂商的模型。",
+)
+
+
+def detect_repo_root() -> Path | None:
+    """bootstrap 布局下从脚本自身位置推导项目根目录。
+
+    bootstrap 后脚本位于 `<repo>/docs/guides/execution-adapters/omp/provision.py`，项目根即
+    其 parents[4]。只在路径形态精确命中该布局时返回；skill 目录布局
+    （`<skill-root>/adapters/omp/provision.py`）返回 None，由调用方回退到当前工作目录，
+    避免把 SAGE 仓库自身误判成目标项目（skill 仓库根同样有 AGENTS.md，不能靠它定位）。
+    """
+    script = Path(__file__).resolve()
+    expected_tail = ("docs", "guides", "execution-adapters", "omp", "provision.py")
+    if script.parts[-5:] != expected_tail:
+        return None
+    return script.parents[4]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="生成 OMP .omp/ 目录三件套：config.yml（modelRoles）+ agents/sage-*.md（自定义 agent 定义）"
@@ -99,7 +123,7 @@ def parse_args() -> argparse.Namespace:
         "--target-dir",
         type=Path,
         default=None,
-        help="OMP 项目配置根目录（应为 <repo>/.omp）；不指定时默认 <当前目录>/.omp；config.yml 写入该根，agent 定义写入 agents/ 子目录",
+        help="OMP 项目配置根目录（应为 <repo>/.omp）；不指定时，bootstrap 布局下默认 <脚本所在项目根>/.omp（与 omp.json 同项目），否则 <当前目录>/.omp；config.yml 写入该根，agent 定义写入 agents/ 子目录",
     )
     parser.add_argument(
         "--user",
@@ -114,7 +138,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="强制覆盖已存在的配置文件；不带 --force 时 config.yml 为增量合并（保留非 modelRoles 段），agent 文件存在时跳过",
+        help="强制覆盖已存在的配置文件；不带 --force 时 config.yml 为增量合并（保留非 modelRoles 段，注释头不重复），agent 文件存在时覆盖（内容完全由角色决定，无用户手改价值）",
     )
     parser.add_argument(
         "--format",
@@ -127,7 +151,8 @@ def parse_args() -> argparse.Namespace:
     if args.user:
         args.target_dir = USER_AGENT_DIR
     elif args.target_dir is None:
-        args.target_dir = Path.cwd() / ".omp"
+        repo_root = detect_repo_root()
+        args.target_dir = (repo_root if repo_root is not None else Path.cwd()) / ".omp"
     return args
 
 
@@ -166,9 +191,7 @@ def build_modelroles_block(roles: list[str], models: dict[str, Any]) -> tuple[st
     """
     warnings: list[str] = []
     lines = [
-        "# OMP modelRoles 配置（SAGE 适配器生成）",
-        "# 三角色独立键；审查（sage_reviewer）覆盖 plan-review+code-review 两阶段，模型值来自 omp.json models.<phase>.id。",
-        "# 跨模型异构盲审：将 plan-review/code-review 阶段的模型配为与 default（主会话模型）不同厂商的模型。",
+        *_GENERATED_HEADER_LINES,
         "",
         "modelRoles:",
     ]
@@ -214,8 +237,12 @@ def build_agent_md(role: str) -> str:
 def merge_config_yml(existing_text: str, new_modelroles_block: str) -> str:
     """增量合并：保留已有 config.yml 中非 modelRoles 段，替换 modelRoles 段为新生成内容。
 
-    策略：逐行扫描，提取 modelRoles: 到下一个顶层键之间的行（即旧 modelRoles 段），
-    其余行（含注释、空行、其他段）保留；最终输出 = 保留段 + 新 modelRoles 段。
+    策略：逐行扫描，剔除 `modelRoles:` 到下一个顶层键之间的行（即旧 modelRoles 段），
+    其余行保留；最终输出 = 保留段 + 新 modelRoles 段。
+
+    生成块自带注释头。若保留段里已含这些注释（上一次生成留下的），会被当成
+    「非 modelRoles 段」逐次重复堆积——2026-10-25 实测每次裸跑 +4 行。故合并前先从
+    保留段剥离这些注释及紧随其后的空行，由生成块统一重新输出。
     """
     preserved: list[str] = []
     in_modelroles = False
@@ -236,6 +263,19 @@ def merge_config_yml(existing_text: str, new_modelroles_block: str) -> str:
     # 清理末尾多余空行
     while preserved and preserved[-1].strip() == "":
         preserved.pop()
+    # 剥离生成块注释头（见 docstring）：避免增量合并逐次重复堆积
+    header = [ln.strip() for ln in _GENERATED_HEADER_LINES]
+    idx = 0
+    while idx < len(preserved):
+        end = idx + len(header)
+        if [ln.strip() for ln in preserved[idx:end]] == header:
+            del preserved[idx:end]
+            while idx < len(preserved) and preserved[idx].strip() == "":
+                del preserved[idx]
+            continue
+        idx += 1
+    while preserved and preserved[-1].strip() == "":
+        preserved.pop()
     if preserved:
         return "\n".join(preserved) + "\n\n" + new_modelroles_block
     return new_modelroles_block
@@ -245,9 +285,12 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
     """按角色生成 agents/sage-<role>.md + config.yml。
 
     写入语义：
-    - agent 文件：不存在→写入；存在+不带 --force→skipped；存在+--force→覆盖
-    - config.yml：不存在→写入（新建）；存在+不带 --force→增量合并（保留非 modelRoles 段，替换 modelRoles 段）；存在+--force→整文件覆盖
-    - 目标目录：默认 <当前目录>/.omp（项目）；--user → ~/.omp/agent（宿主用户注册目录）
+    - agent 文件：一律覆盖。内容完全由 role 决定（frontmatter `model` 是角色别名，真模型在
+      config.yml 解析），不含用户手改价值，故不设跳过保护；`--force` 不再影响它。
+    - config.yml：不存在→写入（新建）；存在+不带 --force→增量合并（保留非 modelRoles 段，替换
+      modelRoles 段，剥离上次生成的注释头防堆积）；存在+--force→整文件覆盖（会丢自定义段）
+    - 目标目录：bootstrap 布局默认 <脚本所在项目根>/.omp（与 omp.json 同项目）；否则 <当前目录>/.omp；
+      --user → ~/.omp/agent（宿主用户注册目录）
     """
     models, models_source = load_omp_json()
     roles = [args.role] if args.role else list(PROVISION_ROLES)
@@ -261,9 +304,6 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
     for role in roles:
         content = build_agent_md(role)
         target_path = agents_dir / f"{ROLE_AGENT_NAME[role]}.md"
-        if target_path.exists() and not args.force:
-            results.append({"role": f"agent:{role}", "path": str(target_path), "status": "skipped", "note": "已存在；使用 --force 覆盖"})
-            continue
         target_path.write_text(content, encoding="utf-8")
         results.append({"role": f"agent:{role}", "path": str(target_path), "status": "written", "note": None})
 
@@ -302,7 +342,7 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
         f"确认 agents/sage-*.md 位于 {'~/.omp/agent/agents/' if is_user_dir else '<repo>/.omp/agents/'} 下；OMP 从该目录发现自定义 agent（项目优先于用户级与内置）。",
         "重启或刷新 OMP；在 /agents 面板确认 sage_reviewer/sage_coder/sage_closer 可见，在 /model 的 Roles 视图确认同名角色。",
         "跨模型异构盲审：将 omp.json 中 plan-review/code-review 阶段的 models.id 配置为与 default（主会话模型）不同厂商的模型（两阶段共用 sage_reviewer 键，取 plan-review 值）。",
-        "不带 --force 时 config.yml 为增量合并（保留非 modelRoles 段）；带 --force 时整文件覆盖。",
+        "config.yml：不带 --force 时增量合并（保留自定义段，只替换 modelRoles 段）；带 --force 时整文件覆盖（会丢失自定义段）。agent 文件一律覆盖，不含手改内容。",
     ]
 
     return {

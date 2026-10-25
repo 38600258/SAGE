@@ -105,10 +105,11 @@ def parse_args() -> argparse.Namespace:
     provision = subparsers.add_parser("provision", help="生成宿主 agent 注册文件（委托适配器 provision.py 执行）")
     provision.add_argument("--adapter", required=True, help="adapter 名称（如 codex、claude-code）")
     provision.add_argument("--repo-root", type=Path, help="项目根目录；提供时优先使用项目本地 execution-adapters 下的 provision.py")
-    provision.add_argument("--target-dir", required=True, type=Path, help="宿主注册目录（如 ~/.codex/agents 或项目 .claude/agents）")
+    provision.add_argument("--target-dir", type=Path, help="宿主注册目录（如项目 .codex/agents 或 ~/.claude/agents）；不指定时由适配器 provision.py 决定（默认项目目录，--user 写用户目录）")
     provision.add_argument("--model-provider", help="TOML 模板的 model_provider（仅 codex 适配器消费），默认 codex_shim")
     provision.add_argument("--role", choices=PROVISION_ROLES, help="只生成指定角色；缺省生成全部")
     provision.add_argument("--force", action="store_true", help="覆盖已存在的注册文件")
+    provision.add_argument("--user", action="store_true", help="委托适配器写入宿主用户注册目录（如 ~/.codex/agents），而非项目目录；与 --target-dir 互斥")
     provision.add_argument("--format", choices=("text", "json"), default="text")
 
     return parser.parse_args()
@@ -921,14 +922,14 @@ def provision_delegate(args: argparse.Namespace) -> int:
     主入口只负责定位脚本、拼装透传参数并转发 stdout/stderr。
     """
     script = locate_provision_script(args.adapter, args.repo_root)
-    command = [
-        sys.executable,
-        str(script),
-        "--target-dir",
-        str(args.target_dir),
-        "--format",
-        args.format,
-    ]
+    if args.user and args.target_dir is not None:
+        raise DispatchError("--user 与 --target-dir 互斥，不能同时指定")
+    command = [sys.executable, str(script)]
+    if args.target_dir is not None:
+        command.extend(("--target-dir", str(args.target_dir)))
+    if args.user:
+        command.append("--user")
+    command.extend(("--format", args.format))
     if args.role:
         command.extend(("--role", args.role))
     if args.force:

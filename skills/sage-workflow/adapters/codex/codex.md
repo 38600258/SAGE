@@ -33,7 +33,7 @@ uv run python scripts/sage_dispatch.py verify --receipt <receipt> --format json
 Codex 自定义 agent 是 TOML 注册文件（`sage_reviewer.toml`/`sage_coder.toml`/`sage_closer.toml`），需放置到宿主注册目录才能被原生 subagent 派发。`provision` 生成：
 
 ```powershell
-# 不带参数：默认生成到 <当前目录>/.codex/agents（项目目录），随仓库版本管理
+# 不带参数：默认生成到 <脚本所在项目根>/.codex/agents（项目目录），随仓库版本管理
 uv run python docs/guides/execution-adapters/codex/provision.py
 
 # 部署到宿主用户注册目录（~/.codex/agents），与 --target-dir 互斥
@@ -45,11 +45,11 @@ uv run python docs/guides/execution-adapters/codex/provision.py --target-dir C:\
 
 复制/部署方式（给 AI 看的一句话自动部署）：
 
-- **项目目录（默认）**：在仓库根运行 `provision.py`（不带参数），生成 `<repo>/.codex/agents/`（3 个 TOML），随仓库版本管理。
+- **项目目录（默认）**：运行 `provision.py`（不带参数），生成 `<repo>/.codex/agents/`（3 个 TOML），随仓库版本管理；从任意目录运行都定位到脚本所在仓库。
 - **用户目录（--user）**：运行 `provision.py --user`，生成 `~/.codex/agents/`（3 个 TOML），全局配置、多项目共享。
-- 手动复制：把 `sage_reviewer.toml`/`sage_coder.toml`/`sage_closer.toml` 复制到 `.codex/agents/`（项目）或 `~/.codex/agents/`（个人）。
+- **手动复制**：把 `sage_reviewer.toml`/`sage_coder.toml`/`sage_closer.toml` 复制到 `.codex/agents/`（项目）或 `~/.codex/agents/`（个人）。
 
-写入语义：文件不存在→写入；已存在+不带 `--force`→跳过；已存在+`--force`→覆盖（幂等可重入）。
+写入语义：模型写进 TOML 本体的 `model` 字段，与 adapter JSON 的 `models.<phase>.id` 是两个真相源。已存在+不带 `--force` 时**不静默跳过**，而是比对两者——一致判 `skipped`，不一致判 `drift` 并提示加 `--force`，避免改了 `codex.json` 却以为已生效；`--force` 一律覆盖。
 
 ## 失败恢复
 

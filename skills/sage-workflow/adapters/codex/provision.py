@@ -2,7 +2,7 @@
 """Codex 适配器子代理生成器：生成 Codex 宿主的 TOML agent 注册文件。
 
 双入口设计：
-- 独立运行：`python adapters/codex/provision.py`（默认项目目录 <当前目录>/.codex/agents）或 `--user`（用户目录 ~/.codex/agents）
+- 独立运行：`python adapters/codex/provision.py`（默认项目目录 <脚本所在项目根>/.codex/agents）或 `--user`（用户目录 ~/.codex/agents）
 - 委托运行：`core/scripts/dispatch_phase.py provision --adapter codex ...`（主入口以 subprocess 调用本脚本，显式传 --target-dir）
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,21 @@ ROLE_PHASES = {
     "coder": ("dev",),
     "closer": ("close",),
 }
+
+
+def role_model_id(role: str, models: dict[str, Any]) -> tuple[str | None, str | None]:
+    """返回角色的期望模型标识符与告警：审查角色取 plan-review 首个非空，与 code-review 不一致时告警。"""
+    phases = ROLE_PHASES[role]
+    ids = [models.get(phase, {}).get("id") or None for phase in phases]
+    model_id = next((item for item in ids if item), None)
+    distinct = {item for item in ids if item}
+    warning = None
+    if len(distinct) > 1:
+        warning = f"{role} 各阶段默认模型不一致：{sorted(distinct)}；已采用 {model_id}"
+    if not model_id:
+        warning = f"未解析到 {role} 默认模型；请替换 model 字段后再注册"
+    return model_id, warning
+
 
 # 写入注册文件的角色级指令：与派发信封的角色契约互补，只约束执行载体层行为
 ROLE_INSTRUCTIONS = {
@@ -38,9 +54,24 @@ ROLE_INSTRUCTIONS = {
 }
 
 
+def detect_repo_root() -> Path | None:
+    """bootstrap 布局下从脚本自身位置推导项目根目录。
+
+    bootstrap 后脚本位于 `<repo>/docs/guides/execution-adapters/codex/provision.py`，项目根即
+    其 parents[4]。只在路径形态精确命中该布局时返回；skill 目录布局
+    （`<skill-root>/adapters/codex/provision.py`）返回 None，由调用方回退到当前工作目录，
+    避免把 SAGE 仓库自身误判成目标项目（skill 仓库根同样有 AGENTS.md，不能靠它定位）。
+    """
+    script = Path(__file__).resolve()
+    expected_tail = ("docs", "guides", "execution-adapters", "codex", "provision.py")
+    if script.parts[-5:] != expected_tail:
+        return None
+    return script.parents[4]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="生成 Codex 宿主 TOML agent 注册文件")
-    parser.add_argument("--target-dir", type=Path, default=None, help="宿主注册目录（如 ~/.codex/agents 或项目 .codex/agents）；不指定时默认 <当前目录>/.codex/agents")
+    parser.add_argument("--target-dir", type=Path, default=None, help="宿主注册目录（项目 .codex/agents 或用户 ~/.codex/agents）；不指定时，bootstrap 布局下默认 <脚本所在项目根>/.codex/agents，否则 <当前目录>/.codex/agents")
     parser.add_argument("--user", action="store_true", help="部署到宿主用户注册目录（~/.codex/agents），而非项目目录；与 --target-dir 互斥")
     parser.add_argument("--model-provider", help="TOML 模板的 model_provider，默认 codex_shim")
     parser.add_argument("--role", choices=PROVISION_ROLES, help="只生成指定角色；缺省生成全部")
@@ -52,7 +83,8 @@ def parse_args() -> argparse.Namespace:
     if args.user:
         args.target_dir = Path.home() / ".codex" / "agents"
     elif args.target_dir is None:
-        args.target_dir = Path.cwd() / ".codex" / "agents"
+        repo_root = detect_repo_root()
+        args.target_dir = (repo_root if repo_root is not None else Path.cwd()) / ".codex" / "agents"
     return args
 
 
@@ -72,15 +104,9 @@ def load_models() -> tuple[dict[str, Any], str]:
 def build_toml_agent(role: str, models: dict[str, Any], provider: str) -> tuple[str, str | None]:
     """生成单个角色的 TOML 注册内容；各阶段模型不一致或缺失时返回人工处理警示。"""
     phases = ROLE_PHASES[role]
-    ids = [models.get(phase, {}).get("id") for phase in phases]
-    model_id = next((item for item in ids if item), None)
-    warning = None
-    distinct = {item for item in ids if item}
-    if len(distinct) > 1:
-        warning = f"{role} 各阶段默认模型不一致：{sorted(distinct)}；已采用 {model_id}"
+    model_id, warning = role_model_id(role, models)
     if not model_id:
         model_id = "REPLACE_WITH_MODEL_ID"
-        warning = f"未解析到 {role} 默认模型；请替换 model 字段后再注册"
     sandbox = "workspace-write"
     sandbox_note = None
     if role == "reviewer":
@@ -107,8 +133,17 @@ def build_toml_agent(role: str, models: dict[str, Any], provider: str) -> tuple[
     return content, sandbox_note
 
 
+def _registered_model(content: str) -> str | None:
+    """从已存在的 TOML 注册内容中提取 model 字段值；解析不到返回 None。"""
+    match = re.search(r'^\s*model\s*=\s*"([^"]*)"', content, flags=re.MULTILINE)
+    return match.group(1) if match else None
+
+
 def provision(args: argparse.Namespace) -> dict[str, Any]:
-    """按角色循环生成 sage-<role>.toml；已存在且未 --force 时跳过，保证幂等可重入。"""
+    """按角色循环生成 sage-<role>.toml；模型写进 TOML 本体，故注册文件与 adapter JSON 的
+    models.<phase>.id 是两个真相源：已存在且未 --force 时**不静默跳过**，而是比对两者，
+    不一致则显式告警并要求 --force，避免改了 codex.json 却以为已生效的双源漂移。
+    """
     target_dir = args.target_dir.resolve()
     roles = [args.role] if args.role else list(PROVISION_ROLES)
     models, models_source = load_models()
@@ -120,15 +155,25 @@ def provision(args: argparse.Namespace) -> dict[str, Any]:
         filename = f"sage_{role}.toml"
         content, sandbox_note = build_toml_agent(role, models, provider)
         target_path = target_dir / filename
+        expected_model, _ = role_model_id(role, models)
         if target_path.exists() and not args.force:
-            results.append({"role": role, "path": str(target_path), "status": "skipped", "note": "已存在；使用 --force 覆盖"})
+            registered = _registered_model(target_path.read_text(encoding="utf-8"))
+            if expected_model and registered and registered != expected_model:
+                results.append({
+                    "role": role,
+                    "path": str(target_path),
+                    "status": "drift",
+                    "note": f"注册文件 model={registered}，adapter JSON 要求 {expected_model}；已跳过。加 --force 覆盖以同步",
+                })
+                continue
+            results.append({"role": role, "path": str(target_path), "status": "skipped", "note": "已存在且与 adapter JSON 一致；加 --force 可强制覆盖"})
             continue
         target_path.write_text(content, encoding="utf-8")
         results.append({"role": role, "path": str(target_path), "status": "written", "note": sandbox_note})
     post_steps = [
         "重启或刷新宿主以加载新的 agent 注册；注册是否生效以宿主实际派发结果为准。",
-        "注册型模型变更必须同步 adapter JSON（models.<phase>），避免双源漂移。",
-        f"目标目录为 {'~/.codex/agents（宿主用户注册目录，--user）' if args.user else '<当前目录>/.codex/agents（项目目录）'}；项目目录随仓库版本管理，用户目录为全局配置，请人工确认放置位置。",
+        "注册型模型变更必须同步 adapter JSON（models.<phase>），避免双源漂移；检测到 drift 时加 --force 重新生成。",
+        f"目标目录为 {'~/.codex/agents（宿主用户注册目录，--user）' if args.user else '项目 .codex/agents（默认；随仓库版本管理）'}；用户目录为全局配置，请人工确认放置位置。",
     ]
     return {
         "adapter": "codex",

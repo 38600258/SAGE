@@ -27,11 +27,15 @@ uv run python scripts/sage_dispatch.py verify --receipt <receipt> --format json
 宿主 agent 注册缺失或漂移时，用 `provision` 生成项目内 Markdown agents 注册文件（随仓库版本化）：
 
 ```powershell
-# 独立运行（模型取自同目录 claude-code.json，Markdown 注册不消费模型参数）
+# 独立运行：默认写入 <脚本所在项目根>/.claude/agents（从任意目录运行都定位到正确仓库）
+uv run python docs/guides/execution-adapters/claude-code/provision.py
+
+# 显式指定注册目录，或部署到宿主用户目录（~/.claude/agents，全局共享）
 uv run python docs/guides/execution-adapters/claude-code/provision.py --target-dir D:\repo\.claude\agents
+uv run python docs/guides/execution-adapters/claude-code/provision.py --user
 
 # 或经主入口委托执行（bootstrap 后的项目内必须带 --repo-root，否则脚本定位失败）
-uv run python scripts/sage_dispatch.py provision --repo-root D:\repo --adapter claude-code --target-dir D:\repo\.claude\agents
+uv run python scripts/sage_dispatch.py provision --repo-root D:\repo --adapter claude-code
 ```
 
 生成后必须重启/刷新宿主，并用最小派发探针验证注册生效；注册是否可用以宿主实际派发结果为准。
